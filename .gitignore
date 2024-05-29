@@ -12,13 +12,27 @@ archive/
 accelerate/
 zreion/
 __pycache__/
+.ipynb_checkpoints/
+21cmFAST-git/
+FoF-Halo-finder/
+ReionYuga/
+N-Body/
 
 #bash scripts
 *.sh
 
+#YML
+*.yml
+
 #out files
 *.out*
 *.err*
+
+#images
+*.png
+
+#Jupyter notebooks
+*.ipynb
 
 #too big
 wedge_filter.npz
