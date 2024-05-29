@@ -1,0 +1,25 @@
+#virtual env
+torchenv/
+myenv/
+
+#models directory. Consider adding exceptions for recent models
+models/
+
+#old files
+archive/
+
+#various packages + misc
+accelerate/
+zreion/
+__pycache__/
+
+#bash scripts
+*.sh
+
+#out files
+*.out*
+*.err*
+
+#too big
+wedge_filter.npz
+*.npz
