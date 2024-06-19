@@ -4,6 +4,7 @@ myenv/
 
 #models directory. Consider adding exceptions for recent models
 models/
+files/
 
 #old files
 archive/

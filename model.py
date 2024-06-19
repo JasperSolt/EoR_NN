@@ -26,7 +26,7 @@ class Fourier_NN(nn.Module):
 
 
 #Training function
-def train(dataloader, model, optimizer):
+def train(dataloader, model, loss_fn, optimizer):
     model.train()
     tot_loss = 0
     for batch, (X, y) in enumerate(dataloader):
@@ -34,8 +34,9 @@ def train(dataloader, model, optimizer):
         X, y = X.to("cuda"), y.to("cuda")
         pred = model(X)
         y = torch.reshape(y, pred.shape)
+        
         # Compute prediction error
-        loss = model.hp.loss_fn(pred, y)
+        loss = loss_fn(pred, y)
         
         # Backpropagation
         optimizer.zero_grad()
@@ -45,12 +46,11 @@ def train(dataloader, model, optimizer):
         
     #return the average epoch training loss
     avg_loss = tot_loss / len(dataloader)
-    print("Average train loss: {}".format(avg_loss))
     return avg_loss
 
 
 #Validation function
-def test(dataloader, model):
+def test(dataloader, model, loss_fn):
     model.eval()
     tot_loss = 0
     with torch.no_grad():
@@ -58,9 +58,8 @@ def test(dataloader, model):
             X, y = X.to("cuda"), y.to("cuda")
             pred = model(X)
             y = torch.reshape(y, pred.shape)
-            tot_loss += model.hp.loss_fn(pred, y).item()
+            tot_loss += loss_fn(pred, y).item()
     avg_loss = tot_loss / len(dataloader)
-    print("Average test loss: {}".format(avg_loss))
     return avg_loss
     
 #Prediction + save prediction
@@ -98,13 +97,23 @@ def save(model, model_save_name):
     f = model_save_dir + "/" + model_save_name + ".pth"
     print(f"Saving PyTorch Model State to {f}...")
     
-    #accelerator.wait_for_everyone()
-    #unwrapped_model = accelerator.unwrap_model(model)
-    #accelerator.save(unwrapped_model.state_dict(), f)
     torch.save(model.state_dict(), f)
 
     print("Model Saved.")
 
+
+#load model
+def load(model):
+    model_load_dir=model.hp.MODEL_DIR
+    model_load_name=model.hp.MODEL_NAME
+    
+    f = model_load_dir + "/" + model_load_name + ".pth"
+    if os.path.isfile(f):
+        print("Loading model state from {}".format(f))
+        model.load_state_dict(torch.load(f))
+        print("Model loaded.")
+    else:
+        print("Cannot find model path!")
 
 #Save loss
 def save_loss(loss, hp):
@@ -124,16 +133,3 @@ def load_loss(hp):
     return np.load(fl)
     
     
-
-#load model
-def load(model):
-    model_load_dir=model.hp.MODEL_DIR
-    model_load_name=model.hp.MODEL_NAME
-    
-    f = model_load_dir + "/" + model_load_name + ".pth"
-    if os.path.isfile(f):
-        print("Loading model state from {}".format(f))
-        model.load_state_dict(torch.load(f))
-        print("Model loaded.")
-    else:
-        print("Cannot find model path!")

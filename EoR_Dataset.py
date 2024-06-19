@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 class EORImageDataset(Dataset):
     
     #Load data at initialization. Override from Dataset superclass
-    def __init__(self, mode, hp):
+    def __init__(self, mode, hp, verbose=True):
         
         self.mode = mode
         self.hp = hp
@@ -24,6 +24,8 @@ class EORImageDataset(Dataset):
         self.cube_key = 'lightcones/brightness_temp'
         self.label_key = 'lightcone_params/physparams'
         
+        set_nlimit = self.hp.N_LIMIT // self.hp.N_DATASETS
+
         for i in range(self.hp.N_DATASETS):
             #sometimes I'm dumb and create datasets with different keys to the same type of data, i.e., 'bT_cubes' vs. 'full_bT_cubes'
             with h5py.File(self.hp.DATA_PATHS[i], "r") as h5f: 
@@ -48,21 +50,25 @@ class EORImageDataset(Dataset):
                 print("Invalid mode for dataset")
                 
             self.n_samples[i] = end - self.begin[i]
-            print(f"Sim {i}: {self.n_samples[i]} samples")
+            if set_nlimit > 0 and self.n_samples[i] > set_nlimit:
+                self.n_samples[i] = set_nlimit
+                
+            if verbose: print(f"Sim {i}: {self.n_samples[i]} samples")
         
         self.n_samples_total = sum(self.n_samples.values())
-        print(f"Total number of samples: {self.n_samples_total}")
+        if verbose: print(f"Total number of samples: {self.n_samples_total}")
         
         self.cubes = torch.zeros((self.n_samples_total, len(self.hp.ZINDICES), self.hp.SUBSAMPLE_SCALE, self.hp.SUBSAMPLE_SCALE), dtype=torch.float)
-        self.labels = torch.zeros((self.n_samples_total, 1), dtype=torch.float)
+        self.labels = torch.zeros((self.n_samples_total, 2), dtype=torch.float)
         
         pntr = 0
         for i in range(self.hp.N_DATASETS):
             #load data
             for j in range(self.n_samples[i]): #would be faster loading multiple at a time, but I'm worried I'll break something lol
-                if j%100 == 0: print(f"Loading cube {j} of {self.n_samples[i]} from sim {i} (pointer = {pntr})...")
+                if j%100 == 0 and verbose: print(f"Loading cube {j} of {self.n_samples[i]} from sim {i} (pointer = {pntr})...")
                 self.cubes[j+pntr] = self.load_cube(self.begin[i] + j, i)
-                self.labels[j+pntr] = self.load_label(self.begin[i] + j, i)
+                self.labels[j+pntr][0] = self.load_label(self.begin[i] + j, i)
+                self.labels[j+pntr][1] = i
             pntr += self.n_samples[i]
         
     #Override from Dataset
@@ -71,7 +77,8 @@ class EORImageDataset(Dataset):
 
     #Override from Dataset
     def __getitem__(self, idx):
-        return self.cubes[idx].cuda(), self.labels[idx].cuda()
+        #return self.cubes[idx].cuda(), self.labels[idx].cuda()
+        return self.cubes[idx], self.labels[idx]
 
     #####
     #
