@@ -30,7 +30,9 @@ class Dataset_Hyperparameters():
                     tvt_dict={"train":0.8, "val":0.10, "test":0.10},
                     normalize=False,
                     param=0,
-                    n_limit=-1
+                    n_limit=-1,
+                    ztransform=[],
+                    weights=None, #(m, b)
                 ):
 
         # data metadata
@@ -52,7 +54,13 @@ class Dataset_Hyperparameters():
         self.INPUT_CHANNELS = len(self.ZINDICES)
 
         self.PARAM = param
-        self.N_LIMIT=n_limit
+        self.N_LIMIT = n_limit
+        self.ZTRANSFORM = ztransform
+
+        self.WEIGHTS = weights
+        if weights:
+            self.M = weights[0]
+            self.B = weights[1]
 
 '''
 Hyperparameters for the model. 

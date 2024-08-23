@@ -7,7 +7,7 @@ from datetime import datetime
 from EoR_Dataset import EORImageDataset
 from model import Fourier_NN, train, test, save, save_loss, load
 from adversarial_model import encoder, discriminator, regressor
-
+from autoencoder import autoencoder, weighted_mse_loss, corrcoef_loss, ccmse_loss
 from plot_model_results import plot_loss
 
 
@@ -75,7 +75,11 @@ def train_Fourier_NN(hp, init_weights=None):
 
 
 
-
+#####
+#
+# TRAINING ADVERSARIAL
+#
+#####
 def train_adversarial_NN(hp, init_dict=None):
     #make sure we aren't overwriting
     if os.path.isdir(hp.MODEL_DIR):
@@ -232,3 +236,95 @@ def train_adversarial_NN(hp, init_dict=None):
             #save loss
             loss = {"train":trainloss[modulename], "val":valloss[modulename]}
             np.savez(f"{path}_loss.npz", train=loss["train"], val=loss["val"])
+
+
+
+
+
+def train_autoencoder(hp, init_weights=None):
+    #make sure we aren't overwriting
+    if os.path.isdir(hp.MODEL_DIR):
+        print(hp.MODEL_DIR + " already exists. Please rename current model or delete old model directory.")
+    else:
+        # training & testing datasets
+        print("Loading training data...")
+        train_data = EORImageDataset("train", hp.TRAINING_DATA_HP)
+        print("Loading validation data...")
+        val_data = EORImageDataset("val", hp.TRAINING_DATA_HP) 
+
+        # training & testing dataloaders
+        train_dataloader = DataLoader(train_data, batch_size=hp.BATCHSIZE, shuffle=True)
+        val_dataloader = DataLoader(val_data, batch_size=hp.BATCHSIZE, shuffle=True)
+
+        # initialize model
+        model = autoencoder()
+        if torch.cuda.is_available(): model.cuda()
+
+        #lossfn = nn.MSELoss
+        lossfn = ccmse_loss
+        optimizer = optim.Adam(model.parameters(), lr=hp.INITIAL_LR) 
+        scheduler = hp.scheduler(optimizer)
+        
+        if init_weights:
+            print(f"Loading model state from {init_weights}")
+            model.load_state_dict(torch.load(init_weights))
+        
+        #train / test loop
+        loss = { "train" : np.zeros((hp.EPOCHS,)), "val" : np.zeros((hp.EPOCHS,)) }
+        for t in range(hp.EPOCHS):
+            print(f"Epoch {t+1}\n-------------------------------")
+
+            ###
+            # TRAINING LOOP
+            ###
+            model.train()
+            
+            for X, _, _, _ in train_dataloader:
+                if torch.cuda.is_available(): X = X.cuda()
+
+                batchloss = lossfn(model(X), X, hp.ALPHA)
+                batchloss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+
+                loss["train"][t] += batchloss.item() / len(train_dataloader)
+            
+            print(f"Average train loss: {loss['train'][t]}")
+            
+            ###
+            # VALIDATION LOOP
+            ###
+            model.eval()
+
+            with torch.no_grad():
+                for X, _, _, _ in val_dataloader:
+                    if torch.cuda.is_available(): X = X.cuda()
+                    batchloss = lossfn(model(X), X, hp.ALPHA)
+                    loss["val"][t] += batchloss.item() / len(val_dataloader)
+            
+            print(f"Average validation loss: {loss['val'][t]}")
+
+            if hp.LR_DECAY:
+                scheduler.step()
+                print(f"Learning Rate: {scheduler.get_last_lr()}")
+        print()
+        
+        ###
+        # SAVE MODEL
+        ###
+        os.mkdir(hp.MODEL_DIR)
+        path = f"{hp.MODEL_DIR}/{hp.MODEL_NAME}"
+        torch.save(model.state_dict(), f"{path}.pth")
+
+        ###
+        # SAVE + PLOT LOSS
+        ###
+        np.savez(f"{path}_loss.npz", train=loss["train"], val=loss["val"])
+
+        fname_loss = f"{path}_loss.png"
+        title = f"{hp.MODEL_NAME} Loss"
+        plot_loss(loss, fname_loss, title, transform="log")
+
+        
+
+

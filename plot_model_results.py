@@ -2,24 +2,32 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.patches as mpatches
+from matplotlib import colors
 matplotlib.use('AGG')
 import numpy as np
 import os
 import h5py
 import pandas as pd
 
-def plot_loss(loss, fname, title="",start=10, steps=[], steplabels=[], transform="tanh"):    
+
+
+
+def plot_loss(loss, fname, title="",start=10, steps=[], steplabels=[], transform=""):    
     ax = plt.subplot()
     ax.grid(True)
 
     if transform == "tanh":
         train_loss = pd.DataFrame(np.tanh(loss['train'][start:])).ewm(com=5.0).mean()
         val_loss = pd.DataFrame(np.tanh(loss['val'][start:])).ewm(com=5.0).mean()
-        ax.set_ylabel('MSE Loss (tanh + exp running avg)')
+        ax.set_ylabel('Loss (tanh)')
     elif transform == "log":
         train_loss = pd.DataFrame(np.log10(loss['train'][start:])).ewm(com=5.0).mean()
         val_loss = pd.DataFrame(np.log10(loss['val'][start:])).ewm(com=5.0).mean()
-        ax.set_ylabel('MSE Loss (log)')
+        ax.set_ylabel('Loss (log)')
+    else:
+        train_loss = pd.DataFrame(loss['train'][start:]).ewm(com=5.0).mean()
+        val_loss = pd.DataFrame(loss['val'][start:]).ewm(com=5.0).mean()
+        ax.set_ylabel('Loss')
         
     epochs = np.arange(start+1, len(train_loss)+start+1)
 
@@ -49,7 +57,7 @@ def plot_loss(loss, fname, title="",start=10, steps=[], steplabels=[], transform
 
 
 
-def plot_loss_grid(lossdict, fname, title="", start=10, steps=[], steplabels=[], transform="tanh"):
+def plot_loss_grid(lossdict, fname, title="", start=10, steps=[], steplabels=[], transform=""):
     fig, axs = plt.subplots(len(lossdict), 1, sharex=True, tight_layout=True, figsize=(6, 12))
     fig.suptitle(title)
     
@@ -64,6 +72,10 @@ def plot_loss_grid(lossdict, fname, title="", start=10, steps=[], steplabels=[],
             train_loss = pd.DataFrame(np.log10(loss['train'][start:])).ewm(com=5.0).mean()
             val_loss = pd.DataFrame(np.log10(loss['val'][start:])).ewm(com=5.0).mean()
             axs[r].set_ylabel('MSE Loss (log)')
+        else:
+            train_loss = pd.DataFrame(loss['train'][start:]).ewm(com=5.0).mean()
+            val_loss = pd.DataFrame(loss['val'][start:]).ewm(com=5.0).mean()
+            axs[r].set_ylabel('MSE Loss')
 
         epochs = np.arange(start+1, len(train_loss)+start+1)
 
@@ -106,9 +118,7 @@ def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
 
     print(f"Plotting results for parameter: {param}...")
 
-    '''
-    Layout
-    '''
+    #Layout
     fig = plt.figure()
     gs1 = gridspec.GridSpec(3,1)
     ax1, ax2 = fig.add_subplot(gs1[:2]), fig.add_subplot(gs1[2])
@@ -131,9 +141,8 @@ def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
     ax2.set_xlabel(f'True {param}')
     ax2.grid(True)
 
-    '''
-    load and plot the parameter prediction data for each model
-    '''
+    
+    #load and plot the parameter prediction data for each model
     targets, pred, err = np.array([]), np.array([]), np.array([])
     for i, name in enumerate(npz_names):
         result = np.load(name)
@@ -148,9 +157,8 @@ def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
         targets = np.append(targets,model_targets)
         pred = np.append(pred, model_pred)
         err = np.append(err, model_err)
-    '''
-    find axis limits 
-    '''
+    
+    #find axis limits 
     mintargets, maxtargets = np.min(targets), np.max(targets)
     minpred, maxpred = np.min(pred), np.max(pred)
     minerr, maxerr = np.min(err), np.max(err)
@@ -161,93 +169,134 @@ def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
     ax2.set_ylim(minerr*0.95,maxerr*1.05)
     ax2.set_xlim(0.95*mintargets,1.05*maxtargets)
 
-    '''
-    Plot target line
-    '''
+    #Plot target line
     ideal = np.linspace(0.8*mintargets,1.2*maxtargets,10)
     ax1.plot(ideal, ideal, 'k--', alpha=0.3, linewidth=1.5)
     ax2.plot(ideal,len(ideal)*[0.],'k--', alpha=0.3, linewidth=1.5)
 
-    '''
-    Save
-    '''
+    #Save
     plt.tight_layout()
     plt.savefig(f'{figname}.jpeg')
     plt.close()
 
 
 
-def run_multistep_plot():
-    modules = ["enc", "reg", "dis"]
-    steplabels = ["lr=0.003", "lr=0.001", "lr=0.003"]
-    combos = [["p21c", "zreion"], ["p21c", "ctrpx"], ["zreion", "ctrpx"]]
-    allsims = ["p21c", "zreion", "ctrpx"]
 
-    for sims in combos:
-        for alpha in [0.01, 0.05, 0.1]:
-            for ws in [0.0, 3.0]:
-                names = [
-                    f"adversarial_v02_{sims[0]}_{sims[1]}_alpha{alpha}_lr0.003_ws{ws}",
-                    f"adversarial_v02_{sims[0]}_{sims[1]}_alpha{alpha}_lr0.001_ws{ws}_s02",
-                    f"adversarial_v02_{sims[0]}_{sims[1]}_alpha{alpha}_lr0.003_ws{ws}_s03",
-                ]
-                lossdict = {}
-                for module in modules:
-                    lossdict[module] = {}
-                    npz_names = [f"models/{name}/{name}_{module}_loss.npz" for name in names]
-                    lossdict[module]["train"]=np.array([])
-                    lossdict[module]["val"]=np.array([])
-                    steps = []
-                    for npz_name in npz_names:
-                        with np.load(npz_name) as data:
-                            lossdict[module]["train"] = np.concatenate([lossdict[module]["train"], data["train"]])
-                            lossdict[module]["val"] = np.concatenate([lossdict[module]["val"], data["val"]])
-                            steps.append(len(lossdict[module]["train"]))
+
+def plot_image_rows(rows, **kwargs):
+    """Saves a plot of rows of images. 
+    This function is for comparing rows of images from different sets of data. Use plot_image_grid if you just want to plot lots of images in a grid.
     
-                
-                fname = f"models/{names[-1]}/{names[-1]}_all_loss_all_steps.png"
-                fname2 = f"models/plots/{names[-1]}/{names[-1]}_all_loss_all_steps.png"
-                title = f"{names[-1]} Loss"
+    Args:
+       rows (list): List of numpy arrays of shape (ncols, w, h). len(rows) = nrows
     
-                plot_loss_grid(lossdict, fname, title, steps=steps, steplabels=steplabels)
-                plot_loss_grid(lossdict, fname2, title, steps=steps, steplabels=steplabels)
-                
-                npz_names = [f"models/{name}/pred_{name}_on_{s}_test.npz" for s in allsims]
+    Kwargs:
+       title (str): Figure title.
+       fname (str): Name to save image under. If None, runs plt.show() instead of saving.
+       collabels (list of str): list of column labels. Must be length ncols.
+       rowlabels (list of str): list of row labels. Must be length nrows.
+       vmin (float): minimum colorbar value
+       vmax (float): maximum colorbar value
+        
+    """
     
-                figname=f"models/{name}/duration_{name}_p21c_zreion_ctrpx.jpeg"
-                figname2=f"models/plots/{name}/duration_{name}_p21c_zreion_ctrpx.jpeg"
-                
-                plot_model_predictions(npz_names, figname, "dur", allsims, name)
-                plot_model_predictions(npz_names, figname2, "dur", allsims, name)
-                
+    nrows = len(rows)
+    ncols, _, _ = rows[0].shape
+
+    
+    imsize = 1.3
+    w = ncols*imsize + 0.2
+    h = nrows*imsize + 0.9
+    
+    
+    fig, axs = plt.subplots(nrows, ncols, 
+                            figsize = (w,h),
+                            layout='constrained'
+                           )
+    if 'title' in kwargs: fig.suptitle(kwargs['title'])
+    
+    images = [axs[r,c].imshow(rows[r][c]) for r in range(nrows) for c in range(ncols)]
+    
+    for ax in axs.flatten():
+        ax.set_yticks([])
+        ax.set_xticks([])
+
+
+    if 'collabels' in kwargs: 
+         for c in range(ncols):
+             axs[0,c].set_title(kwargs['collabels'][c], fontsize=10)
+
+    if 'rowlabels' in kwargs: 
+         for r in range(nrows):
+             axs[r,0].set_ylabel(kwargs['rowlabels'][r], fontsize=10)
+
+    
+
+    vmin = kwargs.get('vmin', min(image.get_array().min() for image in images))
+    vmax = kwargs.get('vmax', max(image.get_array().max() for image in images))
+        
+    norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    for im in images: im.set_norm(norm)
+    fig.colorbar(images[0], ax=axs, orientation='horizontal', fraction=0.05, aspect=60)
+    
+    if 'fname' in kwargs:
+        plt.savefig(kwargs['fname'])
+    else:
+        plt.show()
+    plt.close()
 
 
 
-def run_logloss_plots():
-    #combos = [["p21c", "zreion"], ["p21c", "ctrpx"], ["zreion", "ctrpx"]]
-    combos = [["zreion", "ctrpx"],]
 
-    for sims in combos:
-        for ws in [0.0, 3.0]:
-            lossdict = {}
-            lossdict["train"]=np.array([])
-            lossdict["val"]=np.array([])
+
+def calc_aspect_ratio(n, y, x):
+    cols, rows, i = 1, n, 0
+    h, w = y*rows, x*cols
+    while w < h:
+        i += 1
+        if n % i == 0:
+            cols = i
+            rows = n//cols
+            h, w = y*rows, x*cols
+    return cols, rows
+
+
+
+def plot_image_grid(imgrid, title=None, fname=None, colorbar=True):
+    cols, rows = calc_aspect_ratio(*imgrid.shape)
+
+    fig, axs = plt.subplots(rows, cols, layout='constrained')
+    if title: fig.suptitle(title)
+    images = []
+
+    for r in range(rows):
+        for c in range(cols):
+            i = r*cols + c
+            ax = axs[r,c]
             
-            names = [f"adversarial_null_v01_{sims[0]}_{sims[1]}_ws{ws}_s03",]
-            npz_names = [f"models/{name}/{name}_reg_loss.npz" for name in names]
+            images.append(ax.imshow(imgrid[i]))
             
-            for npz_name in npz_names:
-                with np.load(npz_name) as data:
-                    lossdict["train"] = np.concatenate([lossdict["train"], data["train"]])
-                    lossdict["val"] = np.concatenate([lossdict["val"], data["val"]])
+            ax.set_xticks([])
+            ax.set_yticks([])
+        
+        ylbl = axs[r,0].set_ylabel(f"{r*cols}-{(r+1)*cols-1}", x=0, y=0.5, 
+                             horizontalalignment='right', 
+                             verticalalignment='center',
+                             rotation=0)
 
-            
-            fname = f"models/plots/{names[-1]}/{names[-1]}_logloss.png"
-            title = f"{names[-1]} Loss"
+    ###
+    # Colorbar
+    ###
+    if colorbar:
+        vmin = min(image.get_array().min() for image in images)
+        vmax = max(image.get_array().max() for image in images)
+        norm = colors.Normalize(vmin=vmin, vmax=vmax)
+        for im in images:
+            im.set_norm(norm)
+        plt.colorbar(images[0], ax=axs)
 
-            plot_loss(lossdict, fname, title, transform="log")
-
-
-
-if __name__=='__main__':
-    run_logloss_plots()
+    if fname:
+        plt.savefig(fname)
+    else:
+        plt.show()
+    plt.close()

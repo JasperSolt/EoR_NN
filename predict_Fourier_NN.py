@@ -67,3 +67,8 @@ def predict_adversarial_NN(hp_model, hp_test, mode="test"):
     
     print("Prediction saved.")
     return f
+
+
+
+
+
