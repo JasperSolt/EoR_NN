@@ -16,18 +16,17 @@ def plot_loss(loss, fname, title="",start=10, steps=[], steplabels=[], transform
     ax = plt.subplot()
     ax.grid(True)
 
-    if transform == "tanh":
-        train_loss = pd.DataFrame(np.tanh(loss['train'][start:])).ewm(com=5.0).mean()
-        val_loss = pd.DataFrame(np.tanh(loss['val'][start:])).ewm(com=5.0).mean()
-        ax.set_ylabel('Loss (tanh)')
-    elif transform == "log":
-        train_loss = pd.DataFrame(np.log10(loss['train'][start:])).ewm(com=5.0).mean()
-        val_loss = pd.DataFrame(np.log10(loss['val'][start:])).ewm(com=5.0).mean()
+    ax.set_ylabel('Loss')
+    train_loss, val_loss = loss['train'][start:], loss['val'][start:]
+    
+    if transform == "log":
+        train_loss = np.log10(train_loss)
+        val_loss = np.log10(val_loss)
         ax.set_ylabel('Loss (log)')
-    else:
-        train_loss = pd.DataFrame(loss['train'][start:]).ewm(com=5.0).mean()
-        val_loss = pd.DataFrame(loss['val'][start:]).ewm(com=5.0).mean()
-        ax.set_ylabel('Loss')
+
+    train_loss = pd.DataFrame(train_loss).ewm(com=5.0).mean()
+    val_loss = pd.DataFrame(val_loss).ewm(com=5.0).mean()
+        
         
     epochs = np.arange(start+1, len(train_loss)+start+1)
 
@@ -102,6 +101,41 @@ def plot_loss_grid(lossdict, fname, title="", start=10, steps=[], steplabels=[],
     plt.close()
 
 
+def plot_loss_comparison(loss, fname, title="", start=10, steps=[], steplabels=[], transform=None, ylabel="Loss"):    
+    ax = plt.subplot()
+    ax.grid(True)
+    
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel('Epochs')
+
+    data = {k: v[start:] for k, v in loss.items()}
+    if transform:
+        data = {k: transform(v) for k, v in data.items()}
+    data = {k: pd.DataFrame(v).ewm(com=5.0).mean() for k, v in data.items()}
+
+    
+    epochs = np.arange(start+1, len(data[list(data.keys())[0]])+start+1)
+
+    for k, v in data.items():
+        ax.plot(epochs, v, label=k, linewidth=0.7)
+    
+    for i in range(len(steps)):
+        ax.axvline(steps[i], color='red', ls=":", alpha=0.5)
+        ax.text(
+            steps[i]-0.02*(ax.get_xlim()[1]), 
+            ax.get_ylim()[1] - 0.03*(ax.get_ylim()[1]-ax.get_ylim()[0]), 
+            steplabels[i],
+            horizontalalignment='right',
+            verticalalignment='top',
+            color='#000000',
+            backgroundcolor='#eeeeeec0',)
+    
+    ax.legend()
+    ax.set_title(title)
+    
+    plt.savefig(fname)
+    print("Loss plot saved.")
+    plt.close()
 
 
 
@@ -183,22 +217,23 @@ def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
 
 
 
-def plot_image_rows(rows, **kwargs):
+def plot_image_rows(rowdict, **kwargs):
     """Saves a plot of rows of images. 
     This function is for comparing rows of images from different sets of data. Use plot_image_grid if you just want to plot lots of images in a grid.
     
     Args:
-       rows (list): List of numpy arrays of shape (ncols, w, h). len(rows) = nrows
+       rowdict (dict {rowlabel -> list}): List of numpy arrays of shape (ncols, w, h). len(rows) = nrows
     
     Kwargs:
        title (str): Figure title.
        fname (str): Name to save image under. If None, runs plt.show() instead of saving.
        collabels (list of str): list of column labels. Must be length ncols.
-       rowlabels (list of str): list of row labels. Must be length nrows.
        vmin (float): minimum colorbar value
        vmax (float): maximum colorbar value
         
     """
+    rowlabels = kwargs.get("rowlabels", list(rowdict.keys()))
+    rows = [rowdict[k] for k in rowlabels]
     
     nrows = len(rows)
     ncols, _, _ = rows[0].shape
@@ -215,20 +250,20 @@ def plot_image_rows(rows, **kwargs):
                            )
     if 'title' in kwargs: fig.suptitle(kwargs['title'])
     
+    axs = axs.reshape((nrows,ncols))
     images = [axs[r,c].imshow(rows[r][c]) for r in range(nrows) for c in range(ncols)]
-    
+
     for ax in axs.flatten():
         ax.set_yticks([])
         ax.set_xticks([])
 
 
     if 'collabels' in kwargs: 
-         for c in range(ncols):
-             axs[0,c].set_title(kwargs['collabels'][c], fontsize=10)
+        for c in range(ncols):
+            axs[0,c].set_title(kwargs['collabels'][c], fontsize=10)
 
-    if 'rowlabels' in kwargs: 
-         for r in range(nrows):
-             axs[r,0].set_ylabel(kwargs['rowlabels'][r], fontsize=10)
+    for r in range(nrows):
+        axs[r,0].set_ylabel(rowlabels[r], fontsize=10)
 
     
 

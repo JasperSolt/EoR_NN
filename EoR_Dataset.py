@@ -12,29 +12,27 @@ class EORImageDataset(Dataset):
         
         self.mode = mode
         self.hp = hp
-        
-        cubes = {}
-        labels = {}
-        
+
         self.subdiv = {}
         self.truesize = {}
-        self.n_samples = {}
+        self.dataset_len = {}
         self.begin = {}
 
         self.cube_key = 'lightcones/brightness_temp'
         self.label_key = 'lightcone_params/physparams'
         
-        set_nlimit = self.hp.N_LIMIT // self.hp.N_DATASETS
+        dataset_lenlimit = hp.lenlimit // hp.n_datasets
 
-        for i in range(self.hp.N_DATASETS):
-            with h5py.File(self.hp.DATA_PATHS[i], "r") as h5f: 
-                self.truesize[i], _, boxlen, _ = h5f[self.cube_key].shape
-                self.subdiv[i] = boxlen // self.hp.SUBSAMPLE_SCALE
+        for i in range(hp.n_datasets):
+            with h5py.File(hp.data_paths[i], "r") as f: 
+                self.truesize[i], _, true_boxlength, _ = f[self.cube_key].shape
 
             #determine length of dataset based on mode
+            self.subdiv[i] = true_boxlength // hp.boxlength
+
             size = self.truesize[i] * (self.subdiv[i]**2)
-            train_size = int(self.truesize[i] * self.hp.TVT_DICT["train"]) * (self.subdiv[i]**2) #size of training dataset
-            val_size = int(self.truesize[i] * self.hp.TVT_DICT["val"]) * (self.subdiv[i]**2) #size of validation dataset
+            train_size = int(self.truesize[i] * hp.tvt_dict["train"]) * (self.subdiv[i]**2) #size of training dataset
+            val_size = int(self.truesize[i] * hp.tvt_dict["val"]) * (self.subdiv[i]**2) #size of validation dataset
             
             if self.mode == "train":
                 self.begin[i], end = 0, train_size # train_percent fraction of samples = training set.
@@ -48,19 +46,18 @@ class EORImageDataset(Dataset):
                 self.begin[i], end = 0, 0 
                 print("Invalid mode for dataset")
                 
-            self.n_samples[i] = end - self.begin[i]
-            if set_nlimit > 0 and self.n_samples[i] > set_nlimit:
-                self.n_samples[i] = set_nlimit
+            self.dataset_len[i] = end - self.begin[i]
+            if dataset_lenlimit > 0 and self.dataset_len[i] > dataset_lenlimit:
+                self.dataset_len[i] = dataset_lenlimit
                 
-            if verbose: print(f"Sim {i}: {self.n_samples[i]} samples")
+            if verbose: print(f"Sim {i}: {self.dataset_len[i]} samples")
         
-        self.n_samples_total = sum(self.n_samples.values())
-        if verbose: print(f"Total number of samples: {self.n_samples_total}")
+        self.len = sum(self.dataset_len.values())
+        if verbose: print(f"Total number of samples: {self.len}")
         
-        self.cubes = torch.zeros((self.n_samples_total, len(self.hp.ZINDICES), self.hp.SUBSAMPLE_SCALE, self.hp.SUBSAMPLE_SCALE), dtype=torch.float)
-        self.labels = torch.zeros((self.n_samples_total, 2), dtype=torch.float)
-        self.classes = torch.zeros((self.n_samples_total,), dtype=torch.float)
-        self.weights = torch.zeros((self.n_samples_total, len(self.hp.ZINDICES), 1, 1), dtype=torch.float)
+        self.cubes = torch.zeros((self.len, hp.zlength, hp.boxlength, hp.boxlength), dtype=torch.float)
+        self.labels = torch.zeros((self.len, 2), dtype=torch.float)
+        self.classes = torch.zeros((self.len,), dtype=torch.float)
 
         #####
         #
@@ -68,9 +65,9 @@ class EORImageDataset(Dataset):
         #
         #####
         pntr = 0
-        for i in range(self.hp.N_DATASETS):
-            for j in range(self.n_samples[i]): 
-                if j%100 == 0 and verbose: print(f"Loading cube {j} of {self.n_samples[i]} from sim {i} (pointer = {pntr})...")
+        for i in range(hp.n_datasets):
+            for j in range(self.dataset_len[i]): 
+                if j%100 == 0 and verbose: print(f"Loading cube {j} of {self.dataset_len[i]} from sim {i} (pointer = {pntr})...")
                 
                 ###
                 # LABELS + CLASSES
@@ -81,39 +78,47 @@ class EORImageDataset(Dataset):
                 ###
                 # CUBES (TODO: make less sloppy)
                 ###
-                if "zoomin" in self.hp.ZTRANSFORM and self.mode == "train": 
+                #if "zoomin" in hp.ztransform and self.mode == "train": 
+                if "zoomin" in hp.ztransform: 
                     mdpt, dur = self.labels[j+pntr][:]
-                    r = 6.0
-                    zindrange = np.clip((np.array([mdpt-r//2, mdpt+r//2])-6.0)*512 / 8.75, 0, 511)
-                    zindices = np.linspace(*zindrange, len(self.hp.ZINDICES), dtype=int)
+                    zindrange = np.clip((np.array([mdpt-dur, mdpt+dur])-6.0)*512 / 8.75, 0, 511)
+                    zindices = np.linspace(*zindrange, hp.zlength, dtype=int)
                 else:
-                    zindices = self.hp.ZINDICES
+                    zindices = hp.zindices
 
                 self.cubes[j+pntr] = self.load_cube(self.begin[i] + j, i, zindices)
 
-                ###
-                # WEIGHTS
-                ###
-                if self.hp.WEIGHTS:
-                    maxx = np.max(self.cubes[j+pntr].numpy(), axis=(-2,-1), keepdims=True)
-                    minn = np.min(self.cubes[j+pntr].numpy(), axis=(-2,-1), keepdims=True)
-                    meann = np.mean(self.cubes[j+pntr].numpy(), axis=(-2,-1), keepdims=True)
-                    self.weights[j+pntr] = torch.from_numpy(self.hp.M/(1.0-(maxx-meann)*minn) - self.hp.B)
-                
-            pntr += self.n_samples[i]
+            pntr += self.dataset_len[i]
         
+        #####
+        #
+        # REBATCH
+        #
+        #####
+        #if the input dimension is less than the number of channels, split channels into mini batches
+        self.rebatch = hp.zlength // hp.n_channels
+        if self.rebatch > 1:
+            #self.labels = torch.repeat_interleave(self.labels, self.rebatch, dim=0)
+            #self.classes = torch.repeat_interleave(self.classes, self.rebatch, dim=0)
+            self.cubes = torch.reshape(self.cubes, (self.len*self.rebatch, hp.n_channels, hp.boxlength, hp.boxlength))
+            self.len *= self.rebatch
+
+            
+    
     #Override from Dataset
     def __len__(self):
-        return self.n_samples_total
+        return self.len
 
     #Override from Dataset
     def __getitem__(self, idx):
-        cube, label, cls, weight = self.cubes[idx], self.labels[idx], self.classes[idx], self.weights[idx]
-        if "shufflez" in self.hp.ZTRANSFORM and self.mode == "train": 
+        cube = self.cubes[idx]
+        if "shufflez" in self.hp.ztransform and self.mode == "train": 
             rpm = torch.randperm(cube.size()[0])
-            cube, weight = cube[rpm], weight[rpm]
-
-        return cube, label, cls, weight
+            cube = cube[rpm]
+            
+        label, cls = self.labels[idx // self.rebatch], self.classes[idx // self.rebatch]
+        
+        return cube, label, cls
 
 
     #####
@@ -127,20 +132,20 @@ class EORImageDataset(Dataset):
         
     #Load one cube from h5py
     def load_cube(self, idx, sim_index, zindices):        
-        with h5py.File(self.hp.DATA_PATHS[sim_index], "r") as h5f:
-            subscale = self.hp.SUBSAMPLE_SCALE
+        with h5py.File(self.hp.data_paths[sim_index], "r") as h5f:
+            subscale = self.hp.boxlength
             i, x, y = self.sub_indices(idx, sim_index)
             cube = torch.tensor(h5f[self.cube_key][i, zindices, subscale*x:subscale*(x+1), subscale*y:subscale*(y+1)], dtype=torch.float)
         return cube
    
     #Load labels from h5py
     def load_label(self, idx, sim_index):
-        with h5py.File(self.hp.DATA_PATHS[sim_index], "r") as h5f:
+        with h5py.File(self.hp.data_paths[sim_index], "r") as h5f:
             i, _, _ = self.sub_indices(idx, sim_index)
             label = torch.tensor(h5f[self.label_key][i, 0:2], dtype=torch.float) 
         return label
     
-    # This method ensures a good parameter distribution if you limit n_samples
+    # This method ensures a good parameter distribution if you limit the length
     def sub_indices(self, idx, sim_index):
         r = idx // self.truesize[sim_index]
         i = idx - r*self.truesize[sim_index]
