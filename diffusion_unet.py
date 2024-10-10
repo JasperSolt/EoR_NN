@@ -1,247 +1,241 @@
 import os
-import numpy as np
 import torch
-from torch import optim
-from torch import nn
-from torch.optim.lr_scheduler import MultiStepLR
-from torch.utils.data import DataLoader, Dataset
-from hyperparams import save_hyperparameters
+import torch.nn as nn
+import torch.nn.functional as F
+from einops import rearrange #pip install einops
+from typing import List
+import random
+import math
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader 
+from timm.utils import ModelEmaV3 #pip install timm 
+from tqdm import tqdm #pip install tqdm
+import matplotlib.pyplot as plt #pip install matplotlib
+import torch.optim as optim
+import numpy as np
+
 from EoR_Dataset import EORImageDataset
-from plot_model_results import plot_loss
+from hyperparams import ModelHyperparameters
 
-#####
-#
-# Loss Functions
-#
-#####
-def corrcoef_loss(input, target, reduction='mean'):    
-    # Covariance
-    X = torch.cat((input, target), dim=-2)
-    X -= torch.mean(X, -1, keepdim=True)
-    X_T = torch.transpose(X, -2, -1)
-    c = torch.matmul(X, X_T) / (X.shape[-1] - 1)
+'''
+Edited from the following tutorial:
+https://towardsdatascience.com/diffusion-model-from-scratch-in-pytorch-ddpm-9d9760528946
+'''
 
-    # Correlation Coefficient
-    d = torch.diagonal(c, dim1=-1, dim2=-2)
-    dd = torch.where(d == 0, 1, d)
-
-    stddev = torch.sqrt(dd)
-    c /= stddev[:,:,:,None]
-    c /= stddev[:,:,None,:]
-
-    #1 - Cross-Correlation
-    ccd = 1-torch.diagonal(c, offset=c.shape[-1]//2, dim1=-1, dim2=-2)
-
-    if reduction == 'mean':
-        return ccd.mean()
-    elif reduction == 'sum':
-        return ccd.sum()
-    return ccd
-
-def ccmse_loss(input, target, alpha=1.0):
-    mse = ((input - target) ** 2).mean()
-    cc = corrcoef_loss(input, target).mean()
-    return  cc + alpha*mse
-
-
-class VAELoss(nn.Module):
-    def __init__(self):
-        super(VAELoss, self).__init__()
-
-    def forward(self, x, x_hat, mean, log_var, alpha=1.0):
-        BCE = nn.functional.binary_cross_entropy(x_hat, x, reduction='sum')
-        KLD = -0.5 * torch.sum(1 + log_var - mean ** 2 - log_var.exp())
-        return alpha*BCE + KLD
-
-
-
-#####
-#
-# Variational Encoder: 
-#
-#####
-
-class conv_var_encoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim_1, hidden_dim_2, latent_dim, kernel_size=3, stride=1, padding='same'):
+class SinusoidalEmbeddings(nn.Module):
+    def __init__(self, time_steps:int, embed_dim: int):
         super().__init__()
-        self.conv1 = nn.Conv2d(input_dim, hidden_dim_1, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.conv2 = nn.Conv2d(hidden_dim_1, hidden_dim_2, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.conv3 = nn.Conv2d(hidden_dim_2, latent_dim, kernel_size=kernel_size, stride=stride, padding=padding)
+        position = torch.arange(time_steps).unsqueeze(1).float()
+        div = torch.exp(torch.arange(0, embed_dim, 2).float() * -(math.log(10000.0) / embed_dim))
+        embeddings = torch.zeros(time_steps, embed_dim, requires_grad=False)
+        embeddings[:, 0::2] = torch.sin(position * div)
+        embeddings[:, 1::2] = torch.cos(position * div)
+        self.embeddings = embeddings
 
-        self.conv_mean = nn.Conv2d(latent_dim, latent_dim, kernel_size=3, padding='same')
-        self.conv_var = nn.Conv2d(latent_dim, latent_dim, kernel_size=3, padding='same')
-        
-        self.relu = nn.ReLU()
-        self.pool = nn.MaxPool2d(2)
-        #self.batch_norm = nn.LazyBatchNorm2d()
-        #self.global_pool = nn.AdaptiveAvgPool2d(1)
+    def forward(self, x, t):
+        embeds = self.embeddings[t].to(x.device)
+        return embeds[:, :, None, None]
+
+
+
+# Residual Blocks
+class ResBlock(nn.Module):
+    def __init__(self, C: int, num_groups: int, dropout_prob: float):
+        super().__init__()
+        self.relu = nn.ReLU(inplace=True)
+        self.gnorm1 = nn.GroupNorm(num_groups=num_groups, num_channels=C)
+        self.gnorm2 = nn.GroupNorm(num_groups=num_groups, num_channels=C)
+        self.conv1 = nn.Conv2d(C, C, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(C, C, kernel_size=3, padding=1)
+        self.dropout = nn.Dropout(p=dropout_prob, inplace=True)
+
+    def forward(self, x, embeddings):
+        x = x + embeddings[:, :x.shape[1], :, :]
+        r = self.conv1(self.relu(self.gnorm1(x)))
+        r = self.dropout(r)
+        r = self.conv2(self.relu(self.gnorm2(r)))
+        return r + x
+
+
+class Attention(nn.Module):
+    def __init__(self, C: int, num_heads:int , dropout_prob: float):
+        super().__init__()
+        self.proj1 = nn.Linear(C, C*3)
+        self.proj2 = nn.Linear(C, C)
+        self.num_heads = num_heads
+        self.dropout_prob = dropout_prob
 
     def forward(self, x):
-        x = self.pool(self.relu(self.conv1(x)))
-        x = self.pool(self.relu(self.conv2(x)))
-        x = self.pool(self.relu(self.conv3(x)))
-        '''
-        x = self.pool(self.relu(self.conv1(x)))
-        x = self.pool(self.relu(self.conv2(x)))
-        x = self.pool(self.relu(self.conv3(x)))
-        '''
-        mean = self.conv_mean(x)
-        var = self.conv_var(x)
-        return mean, var
-#####
-#
-# Decoder: 
-#
-#####
-class conv_decoder(nn.Module):
-    def __init__(self, latent_dim, hidden_dim_1, hidden_dim_2, output_dim, kernel_size=3):
+        h, w = x.shape[2:]
+        x = rearrange(x, 'b c h w -> b (h w) c')
+        x = self.proj1(x)
+        x = rearrange(x, 'b L (C H K) -> K b H L C', K=3, H=self.num_heads)
+        q,k,v = x[0], x[1], x[2]
+        x = F.scaled_dot_product_attention(q,k,v, is_causal=False, dropout_p=self.dropout_prob)
+        x = rearrange(x, 'b H (h w) C -> b h w (C H)', h=h, w=w)
+        x = self.proj2(x)
+        return rearrange(x, 'b h w C -> b C h w')
+
+
+class UnetLayer(nn.Module):
+    def __init__(self, 
+            upscale: bool, 
+            attention: bool, 
+            num_groups: int, 
+            dropout_prob: float,
+            num_heads: int,
+            C: int):
         super().__init__()
-        self.conv1 = nn.Conv2d(latent_dim, hidden_dim_1, kernel_size, padding='same')
-        self.conv2 = nn.Conv2d(hidden_dim_1, hidden_dim_2, kernel_size, padding='same')
-        self.conv3 = nn.Conv2d(hidden_dim_2, output_dim, kernel_size, padding='same')
-        
-        self.relu = nn.ReLU()
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.ResBlock1 = ResBlock(C=C, num_groups=num_groups, dropout_prob=dropout_prob)
+        self.ResBlock2 = ResBlock(C=C, num_groups=num_groups, dropout_prob=dropout_prob)
+        if upscale:
+            self.conv = nn.ConvTranspose2d(C, C//2, kernel_size=4, stride=2, padding=1)
+        else:
+            self.conv = nn.Conv2d(C, C*2, kernel_size=3, stride=2, padding=1)
+        if attention:
+            self.attention_layer = Attention(C, num_heads=num_heads, dropout_prob=dropout_prob)
 
-    def forward(self, x):
-        x = self.relu(self.conv1(self.upsample(x)))
-        x = self.relu(self.conv2(self.upsample(x)))
-        x = torch.sigmoid(self.conv3(self.upsample(x)))
-        #x = self.upsample(x)
-        #x = self.relu(self.conv1(x))
-        #x = self.relu(self.conv2(x))
-        #x = torch.sigmoid(self.conv3(x))
-        return x
-
+    def forward(self, x, embeddings):
+        x = self.ResBlock1(x, embeddings)
+        if hasattr(self, 'attention_layer'):
+            x = self.attention_layer(x)
+        x = self.ResBlock2(x, embeddings)
+        return self.conv(x), x
 
 
+class UNET(nn.Module):
+    def __init__(self,
+            Channels: List = [64, 128, 256, 512, 512, 384],
+            Attentions: List = [False, True, False, False, False, True],
+            Upscales: List = [False, False, False, True, True, True],
+            num_groups: int = 32,
+            dropout_prob: float = 0.1,
+            num_heads: int = 8,
+            input_channels: int = 1,
+            output_channels: int = 1,
+            time_steps: int = 1000):
+        super().__init__()
+        self.num_layers = len(Channels)
+        self.shallow_conv = nn.Conv2d(input_channels, Channels[0], kernel_size=3, padding=1)
+        out_channels = (Channels[-1]//2)+Channels[0]
+        self.late_conv = nn.Conv2d(out_channels, out_channels//2, kernel_size=3, padding=1)
+        self.output_conv = nn.Conv2d(out_channels//2, output_channels, kernel_size=1)
+        self.relu = nn.ReLU(inplace=True)
+        self.embeddings = SinusoidalEmbeddings(time_steps=time_steps, embed_dim=max(Channels))
+        for i in range(self.num_layers):
+            layer = UnetLayer(
+                upscale=Upscales[i],
+                attention=Attentions[i],
+                num_groups=num_groups,
+                dropout_prob=dropout_prob,
+                C=Channels[i],
+                num_heads=num_heads
+            )
+            setattr(self, f'Layer{i+1}', layer)
+
+    def forward(self, x, t):
+        x = self.shallow_conv(x)
+        residuals = []
+        for i in range(self.num_layers//2):
+            layer = getattr(self, f'Layer{i+1}')
+            embeddings = self.embeddings(x, t)
+            x, r = layer(x, embeddings)
+            residuals.append(r)
+        for i in range(self.num_layers//2, self.num_layers):
+            layer = getattr(self, f'Layer{i+1}')
+            x = torch.concat((layer(x, embeddings)[0], residuals[self.num_layers-i-1]), dim=1)
+        return self.output_conv(self.relu(self.late_conv(x)))
+
+
+
+class DDPM_Scheduler(nn.Module):
+    def __init__(self, num_time_steps: int=1000):
+        super().__init__()
+        self.beta = torch.linspace(1e-4, 0.02, num_time_steps, requires_grad=False)
+        alpha = 1 - self.beta
+        self.alpha = torch.cumprod(alpha, dim=0).requires_grad_(False)
+
+    def forward(self, t):
+        return self.beta[t], self.alpha[t]
     
-#####
-#
-# Variational Autoencoder: Large bits taken from the tutorial at
-# https://github.com/Jackson-Kang/Pytorch-VAE-tutorial/blob/master/01_Variational_AutoEncoder.ipynb
-#####
-class vae(nn.Module):
-    def __init__(self, hp):
-        super().__init__()
-        self.hp = hp
-        self.encoder = conv_var_encoder(hp.input_dim, 
-                                        hp.hidden_dim_1, 
-                                        hp.hidden_dim_2, 
-                                        hp.latent_dim,
-                                        kernel_size=hp.kernel_size,
-                                        stride=hp.stride,
-                                        padding=hp.padding
-                                       )
-        self.decoder = conv_decoder(hp.latent_dim, hp.hidden_dim_2, hp.hidden_dim_1, hp.input_dim)
-        self.device = hp.device
 
-    def encode(self, x):
-        return self.encoder(x)
 
-    def decode(self, x):
-        return self.decoder(x)
-
-    def reparameterization(self, mean, var):
-        epsilon = torch.randn_like(var).to(self.device)
-        z = mean + var*epsilon
-        return z
-
-    def forward(self, x):
-        mean, log_var = self.encode(x)
-        z = self.reparameterization(mean, torch.exp(0.5 * log_var))
-        x_hat = self.decode(z)
-        
-        return x_hat, mean, log_var
+def set_seed(seed: int = 42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 
-def train_vae(hp):
-    #make sure we aren't overwriting
-    if os.path.isdir(hp.model_dir) and hp.mode != 'debug':
-        print(hp.model_dir + " already exists. Please rename current model or delete old model directory.")
-    else:
-        # training & testing datasets
-        print("Loading training data...")
-        train_data = EORImageDataset("train", hp.training_data_hp)
-        print("Loading validation data...")
-        val_data = EORImageDataset("val", hp.training_data_hp) 
+def train(hp: ModelHyperparameters):
+    os.mkdir(hp.model_dir)
 
+    set_seed(random.randint(0, 2**32-1))
 
-        
-        # training & testing dataloaders
-        train_dataloader = DataLoader(train_data, batch_size=hp.batchsize, shuffle=True)
-        val_dataloader = DataLoader(val_data, batch_size=hp.batchsize, shuffle=True)
+    train_dataset = EORImageDataset(hp.training_data_hp, mode="train") 
+    train_loader = DataLoader(train_dataset, batch_size=hp.batchsize, shuffle=True)
 
-        model = vae(hp)
-        model.to(hp.device)
+    val_dataset = EORImageDataset(hp.training_data_hp, mode="val") 
+    val_loader = DataLoader(train_dataset, batch_size=hp.batchsize, shuffle=True)
 
-        lossfn = VAELoss()
-        optimizer = optim.Adam(model.parameters(), lr=hp.initial_lr) 
-        scheduler = MultiStepLR(optimizer, milestones=hp.lr_milestones, gamma=hp.lr_gamma) 
-        
-        if hp.parent_model:
-            print(f"Loading model state from {hp.parent_model}")
-            model.load_state_dict(torch.load(hp.parent_model))
+    scheduler = DDPM_Scheduler(num_time_steps=hp.time_steps)
+    model = UNET().to(hp.device)
+    optimizer = optim.Adam(model.parameters(), lr=hp.init_lr)
+    ema = ModelEmaV3(model, decay=hp.ema_decay) 
 
+    if hp.checkpoint_path is not None:
+        checkpoint = torch.load(hp.checkpoint_path)
+        model.load_state_dict(checkpoint['weights'])
+        ema.load_state_dict(checkpoint['ema']) 
+        optimizer.load_state_dict(checkpoint['optimizer'])
 
-            
-        #train / test loop
-        loss = { "train" : np.zeros((hp.epochs,)), "val" : np.zeros((hp.epochs,)) }
-        for t in range(hp.epochs):
-            print(f"Epoch {t+1}\n-------------------------------")
+    criterion = nn.MSELoss(reduction='mean')
 
-            ###
-            # TRAINING LOOP
-            ###
-            model.train()
-            
-            for x, *_ in train_dataloader:
+    loss_dict = {"train_loss" : torch.zeros((hp.epochs)), "val_loss" : torch.zeros((hp.epochs))}
+    
+    # TRAINING
+    model.train()
+    for i in range(hp.epochs):
+        for bidx, (x,_) in enumerate(tqdm(train_loader, desc=f"Epoch {i+1}/{hp.epochs} (Training)")):
+            x = x.to(hp.device)
+            x = F.pad(x, (2,2,2,2))
+            t = torch.randint(0,hp.time_steps,(hp.batchsize,))
+            e = torch.randn_like(x, requires_grad=False)
+            a = scheduler.alpha[t].view(hp.batchsize,1,1,1).cuda()
+            x = (torch.sqrt(a)*x) + (torch.sqrt(1-a)*e)
+            output = model(x, t)
+            optimizer.zero_grad()
+            loss = criterion(output, e)
+            loss_dict['train_loss'][i] += loss.item() / len(train_loader)
+            loss.backward()
+            optimizer.step()
+            ema.update(model)
+        print(f'Epoch {i+1} | Training Loss {loss_dict['train_loss'][i]:.5f}')
+
+        # VALIDATION
+        model.eval()
+        for bidx, (x,_) in enumerate(tqdm(val_loader, desc=f"Epoch {i+1}/{hp.epochs} (Validation)")):
+            with torch.no_grad:
                 x = x.to(hp.device)
-                batchloss = lossfn(x, *model(x))
-                
-                batchloss.backward()
-                optimizer.step()
+                x = F.pad(x, (2,2,2,2))
+                t = torch.randint(0, hp.time_steps, (hp.batchsize,))
+                e = torch.randn_like(x, requires_grad=False)
+                a = scheduler.alpha[t].view(hp.batchsize,1,1,1).cuda()
+                x = (torch.sqrt(a)*x) + (torch.sqrt(1-a)*e)
+                output = model(x, t)
                 optimizer.zero_grad()
+                loss = criterion(output, e)
+                loss_dict['val_loss'][i] += loss.item() / len(val_loader)
+        print(f'Epoch {i+1} | Validation Loss {loss_dict['val_loss'][i]:.5f}')
 
-                loss["train"][t] += batchloss.item()
-            loss["train"][t] /= len(train_data)
-            
-            print(f"Average train loss: {loss['train'][t]}")
-            
-            ###
-            # VALIDATION LOOP
-            ###
-            model.eval()
 
-            with torch.no_grad():
-                for x, *_ in val_dataloader:
-                    x = x.to(hp.device)
-                    batchloss = lossfn(x, *model(x))
-                    loss["val"][t] += batchloss.item()
-            loss["val"][t] /= len(val_data)
+    checkpoint = {
+        'weights': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'ema': ema.state_dict()
+    }
 
-            print(f"Average validation loss: {loss['val'][t]}")
-
-            ###
-            # Learning rate decay
-            ###
-            scheduler.step()
-            print(f"Learning Rate: {scheduler.get_last_lr()}")
-        
-        ###
-        # SAVE MODEL
-        ###
-        os.mkdir(hp.model_dir)
-        path = f"{hp.model_dir}/{hp.model_name}"
-        torch.save(model.state_dict(), f"{path}.pth")
-        save_hyperparameters(hp)
-
-        ###
-        # SAVE + PLOT LOSS
-        ###
-        np.savez(f"{path}_loss.npz", train=loss["train"], val=loss["val"])
-
-        fname_loss = f"{path}_loss.png"
-        title = f"{hp.model_name} Loss"
-        plot_loss(loss, fname_loss, title, transform="log")
+    torch.save(checkpoint, f'{hp.model_dir}/{hp.model_name}')

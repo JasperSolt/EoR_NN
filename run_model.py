@@ -2,7 +2,7 @@ import os
 import numpy as np
 import argparse
 import torch
-from variational_autoencoder import train_vae
+from diffusion_unet import train
 from hyperparams import DataHyperparameters, ModelHyperparameters
 
 def get_path(model_sim, ws):
@@ -59,12 +59,13 @@ hp_model = ModelHyperparameters(
     model_name=model_name, 
     device="cuda" if torch.cuda.is_available() else "cpu",
     training_data_hp=hp_train_data, 
-    batchsize=3 if args.mode=='debug' else 128,
-    epochs=10 if args.mode=='debug' else 500, 
+    batchsize=3 if args.mode=='debug' else 64,
+    time_steps=3 if args.mode=='debug' else 1000,
+    epochs=1 if args.mode=='debug' else 15, 
     initial_lr=lr,
     lr_milestones=[],
-    lr_gamma=0.1,
-    parent_model=None,
+    ema_decay=0.9999,
+    checkpoint_path=None,
     input_dim=hp_train_data.n_channels, 
     hidden_dim_1=hd1,
     hidden_dim_2=hd2,
@@ -74,5 +75,5 @@ hp_model = ModelHyperparameters(
 
 print("Training Loop")
 if args.mode=='debug': torch.autograd.set_detect_anomaly(True)
-train_vae(hp_model)
+train(hp_model)
 
