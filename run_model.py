@@ -40,19 +40,18 @@ hp_train_data = DataHyperparameters(
 
 if args.mode=='debug': hp_train_data.lenlimit=8
 
-
 #Initializing model hyperparameters
 hd1, hd2, ld = args.dims
 lr = 10**args.loglr
     
 modelnum = args.modelnum
-model_name = f"single_channel_vae_v{modelnum:0>4}"
+model_name = f"single_channel_diffunet_v{modelnum:0>4}"
 
 for ts in train_sims:
     model_name += f"_{ts}"
 model_name += f"_ws{ws}"
 if args.mode=='debug': model_name="debug"
-model_dir = "models/" + model_name
+model_dir = "trained_models/" + model_name
 
 
 hp_model = ModelHyperparameters(
@@ -63,14 +62,16 @@ hp_model = ModelHyperparameters(
     time_steps=3 if args.mode=='debug' else 1000,
     epochs=1 if args.mode=='debug' else 15, 
     initial_lr=lr,
-    lr_milestones=[],
     ema_decay=0.9999,
     checkpoint_path=None,
-    input_dim=hp_train_data.n_channels, 
-    hidden_dim_1=hd1,
-    hidden_dim_2=hd2,
-    latent_dim=ld,
-    mode=args.mode
+    input_channels=hp_train_data.n_channels, 
+    layer_channels = [64, 128, 256, 512, 512, 384],
+    layer_attentions = [False, True, False, False, False, True],
+    layer_upscales = [False, False, False, True, True, True],
+    num_groups = 32,
+    dropout_prob = 0.1,
+    num_heads = 8,
+    mode=args.mode,
 )
 
 print("Training Loop")

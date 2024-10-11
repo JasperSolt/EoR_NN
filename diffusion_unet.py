@@ -26,7 +26,7 @@ class SinusoidalEmbeddings(nn.Module):
     def __init__(self, time_steps:int, embed_dim: int):
         super().__init__()
         position = torch.arange(time_steps).unsqueeze(1).float()
-        div = torch.exp(torch.arange(0, embed_dim, 2).float() * -(math.log(10000.0) / embed_dim))
+        div = torch.exp(torch.arange(0, embed_dim, 2).float() * -(math.log(10000.0) / embed_dim)) #TODO: 10000?
         embeddings = torch.zeros(time_steps, embed_dim, requires_grad=False)
         embeddings[:, 0::2] = torch.sin(position * div)
         embeddings[:, 1::2] = torch.cos(position * div)
@@ -104,32 +104,24 @@ class UnetLayer(nn.Module):
 
 
 class UNET(nn.Module):
-    def __init__(self,
-            Channels: List = [64, 128, 256, 512, 512, 384],
-            Attentions: List = [False, True, False, False, False, True],
-            Upscales: List = [False, False, False, True, True, True],
-            num_groups: int = 32,
-            dropout_prob: float = 0.1,
-            num_heads: int = 8,
-            input_channels: int = 1,
-            output_channels: int = 1,
-            time_steps: int = 1000):
+    def __init__(self, hp: ModelHyperparameters):
+        
         super().__init__()
-        self.num_layers = len(Channels)
-        self.shallow_conv = nn.Conv2d(input_channels, Channels[0], kernel_size=3, padding=1)
-        out_channels = (Channels[-1]//2)+Channels[0]
+        self.num_layers = len(hp.layer_channels)
+        self.shallow_conv = nn.Conv2d(hp.input_channels, hp.layer_channels[0], kernel_size=3, padding=1)
+        out_channels = (hp.layer_channels[-1]//2)+hp.layer_channels[0]
         self.late_conv = nn.Conv2d(out_channels, out_channels//2, kernel_size=3, padding=1)
-        self.output_conv = nn.Conv2d(out_channels//2, output_channels, kernel_size=1)
+        self.output_conv = nn.Conv2d(out_channels//2, hp.input_channels, kernel_size=1)
         self.relu = nn.ReLU(inplace=True)
-        self.embeddings = SinusoidalEmbeddings(time_steps=time_steps, embed_dim=max(Channels))
+        self.embeddings = SinusoidalEmbeddings(time_steps=hp.time_steps, embed_dim=max(hp.layer_channels))
         for i in range(self.num_layers):
             layer = UnetLayer(
-                upscale=Upscales[i],
-                attention=Attentions[i],
-                num_groups=num_groups,
-                dropout_prob=dropout_prob,
-                C=Channels[i],
-                num_heads=num_heads
+                upscale=hp.layer_upscales[i],
+                attention=hp.layer_ttentions[i],
+                num_groups=hp.num_groups,
+                dropout_prob=hp.dropout_prob,
+                C=hp.layer_channels[i],
+                num_heads=hp.num_heads
             )
             setattr(self, f'Layer{i+1}', layer)
 
@@ -182,7 +174,7 @@ def train(hp: ModelHyperparameters):
     val_loader = DataLoader(train_dataset, batch_size=hp.batchsize, shuffle=True)
 
     scheduler = DDPM_Scheduler(num_time_steps=hp.time_steps)
-    model = UNET().to(hp.device)
+    model = UNET(hp).to(hp.device)
     optimizer = optim.Adam(model.parameters(), lr=hp.init_lr)
     ema = ModelEmaV3(model, decay=hp.ema_decay) 
 
