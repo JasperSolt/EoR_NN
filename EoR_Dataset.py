@@ -3,8 +3,6 @@ import h5py
 import torch
 from torch.utils.data import Dataset
 
-
-
 class EORImageDataset(Dataset):
     
     #Load data at initialization. Override from Dataset superclass

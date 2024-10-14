@@ -45,8 +45,8 @@ class ResBlock(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.gnorm1 = nn.GroupNorm(num_groups=num_groups, num_channels=C)
         self.gnorm2 = nn.GroupNorm(num_groups=num_groups, num_channels=C)
-        self.conv1 = nn.Conv2d(C, C, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(C, C, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(C, C, kernel_size=3, padding='same')
+        self.conv2 = nn.Conv2d(C, C, kernel_size=3, padding='same')
         self.dropout = nn.Dropout(p=dropout_prob, inplace=True)
 
     def forward(self, x, embeddings):
@@ -100,6 +100,7 @@ class UnetLayer(nn.Module):
         if hasattr(self, 'attention_layer'):
             x = self.attention_layer(x)
         x = self.ResBlock2(x, embeddings)
+        #return self.conv(F.pad(x, (0, 1, 0, 1), "constant", 0)), x
         return self.conv(x), x
 
 
@@ -108,7 +109,7 @@ class UNET(nn.Module):
         
         super().__init__()
         self.num_layers = len(hp.layer_channels)
-        self.shallow_conv = nn.Conv2d(hp.input_channels, hp.layer_channels[0], kernel_size=3, padding=1)
+        self.shallow_conv = nn.Conv2d(hp.input_channels, hp.layer_channels[0], kernel_size=3, padding='same')
         out_channels = (hp.layer_channels[-1]//2)+hp.layer_channels[0]
         self.late_conv = nn.Conv2d(out_channels, out_channels//2, kernel_size=3, padding=1)
         self.output_conv = nn.Conv2d(out_channels//2, hp.input_channels, kernel_size=1)
@@ -117,7 +118,7 @@ class UNET(nn.Module):
         for i in range(self.num_layers):
             layer = UnetLayer(
                 upscale=hp.layer_upscales[i],
-                attention=hp.layer_ttentions[i],
+                attention=hp.layer_attentions[i],
                 num_groups=hp.num_groups,
                 dropout_prob=hp.dropout_prob,
                 C=hp.layer_channels[i],
@@ -132,6 +133,7 @@ class UNET(nn.Module):
             layer = getattr(self, f'Layer{i+1}')
             embeddings = self.embeddings(x, t)
             x, r = layer(x, embeddings)
+            
             residuals.append(r)
         for i in range(self.num_layers//2, self.num_layers):
             layer = getattr(self, f'Layer{i+1}')
@@ -163,19 +165,19 @@ def set_seed(seed: int = 42):
 
 
 def train(hp: ModelHyperparameters):
-    os.mkdir(hp.model_dir)
+    if not hp.debug_mode: os.mkdir(hp.model_dir)
 
     set_seed(random.randint(0, 2**32-1))
 
-    train_dataset = EORImageDataset(hp.training_data_hp, mode="train") 
-    train_loader = DataLoader(train_dataset, batch_size=hp.batchsize, shuffle=True)
+    train_dataset = EORImageDataset("train", hp.data_hp) 
+    train_loader = DataLoader(train_dataset, batch_size=hp.batchsize, shuffle=True, num_workers=0)
 
-    val_dataset = EORImageDataset(hp.training_data_hp, mode="val") 
-    val_loader = DataLoader(train_dataset, batch_size=hp.batchsize, shuffle=True)
+    val_dataset = EORImageDataset("val", hp.data_hp) 
+    val_loader = DataLoader(val_dataset, batch_size=hp.batchsize, shuffle=True, num_workers=0)
 
     scheduler = DDPM_Scheduler(num_time_steps=hp.time_steps)
     model = UNET(hp).to(hp.device)
-    optimizer = optim.Adam(model.parameters(), lr=hp.init_lr)
+    optimizer = optim.Adam(model.parameters(), lr=hp.initial_lr)
     ema = ModelEmaV3(model, decay=hp.ema_decay) 
 
     if hp.checkpoint_path is not None:
@@ -187,16 +189,17 @@ def train(hp: ModelHyperparameters):
     criterion = nn.MSELoss(reduction='mean')
 
     loss_dict = {"train_loss" : torch.zeros((hp.epochs)), "val_loss" : torch.zeros((hp.epochs))}
-    
+    print(torch.cuda.memory_summary(device=None, abbreviated=False))
+
     # TRAINING
     model.train()
     for i in range(hp.epochs):
-        for bidx, (x,_) in enumerate(tqdm(train_loader, desc=f"Epoch {i+1}/{hp.epochs} (Training)")):
+        for bidx, (x, *_) in enumerate(tqdm(train_loader, desc=f"Epoch {i+1}/{hp.epochs} (Training)")):
             x = x.to(hp.device)
-            x = F.pad(x, (2,2,2,2))
-            t = torch.randint(0,hp.time_steps,(hp.batchsize,))
+            this_batchsize = x.shape[0]
+            t = torch.randint(0,hp.time_steps,(this_batchsize,))
             e = torch.randn_like(x, requires_grad=False)
-            a = scheduler.alpha[t].view(hp.batchsize,1,1,1).cuda()
+            a = scheduler.alpha[t].view(this_batchsize,1,1,1).cuda()
             x = (torch.sqrt(a)*x) + (torch.sqrt(1-a)*e)
             output = model(x, t)
             optimizer.zero_grad()
@@ -205,23 +208,26 @@ def train(hp: ModelHyperparameters):
             loss.backward()
             optimizer.step()
             ema.update(model)
-        print(f'Epoch {i+1} | Training Loss {loss_dict['train_loss'][i]:.5f}')
+        print(f"Epoch {i+1} | Training Loss {loss_dict['train_loss'][i]:.5f}")
+        print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
         # VALIDATION
         model.eval()
-        for bidx, (x,_) in enumerate(tqdm(val_loader, desc=f"Epoch {i+1}/{hp.epochs} (Validation)")):
-            with torch.no_grad:
+        for bidx, (x, *_) in enumerate(tqdm(val_loader, desc=f"Epoch {i+1}/{hp.epochs} (Validation)")):
+            with torch.no_grad():
                 x = x.to(hp.device)
-                x = F.pad(x, (2,2,2,2))
-                t = torch.randint(0, hp.time_steps, (hp.batchsize,))
+                this_batchsize = x.shape[0]
+
+                t = torch.randint(0, hp.time_steps, (this_batchsize,))
                 e = torch.randn_like(x, requires_grad=False)
-                a = scheduler.alpha[t].view(hp.batchsize,1,1,1).cuda()
+                a = scheduler.alpha[t].view(this_batchsize,1,1,1).cuda()
                 x = (torch.sqrt(a)*x) + (torch.sqrt(1-a)*e)
                 output = model(x, t)
                 optimizer.zero_grad()
                 loss = criterion(output, e)
                 loss_dict['val_loss'][i] += loss.item() / len(val_loader)
-        print(f'Epoch {i+1} | Validation Loss {loss_dict['val_loss'][i]:.5f}')
+        print(f"Epoch {i+1} | Validation Loss {loss_dict['val_loss'][i]:.5f}")
+
 
 
     checkpoint = {
