@@ -2,7 +2,7 @@ import os
 import numpy as np
 import argparse
 import torch
-from diffusion_unet import train
+from diffusion_unet import train, inference
 from hyperparams import DataHyperparameters, ModelHyperparameters
 
 def get_path(model_sim, ws):
@@ -71,8 +71,11 @@ hp_model = ModelHyperparameters(
     num_heads = 1,
     debug_mode = args.debug,
 )
-
+'''
 print("Training Loop")
 if args.debug: torch.autograd.set_detect_anomaly(True)
 train(hp_model)
+'''
+hp_model.checkpoint_path = f'/users/jsolt/FourierNN/trained_models/{model_name}/{model_name}'
+inference(hp_model)
 

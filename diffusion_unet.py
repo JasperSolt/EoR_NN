@@ -15,11 +15,16 @@ import torch.optim as optim
 import numpy as np
 
 from EoR_Dataset import EORImageDataset
-from hyperparams import ModelHyperparameters
+from hyperparams import ModelHyperparameters, save_hyperparameters
+from plotting import plot_loss
 
 '''
 Edited from the following tutorial:
 https://towardsdatascience.com/diffusion-model-from-scratch-in-pytorch-ddpm-9d9760528946
+
+And
+https://github.com/ermongroup/ddim
+https://github.com/ermongroup/ddim/blob/main/models/diffusion.py
 '''
 
 class SinusoidalEmbeddings(nn.Module):
@@ -189,7 +194,6 @@ def train(hp: ModelHyperparameters):
     criterion = nn.MSELoss(reduction='mean')
 
     loss_dict = {"train_loss" : torch.zeros((hp.epochs)), "val_loss" : torch.zeros((hp.epochs))}
-    print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
     # TRAINING
     model.train()
@@ -199,7 +203,7 @@ def train(hp: ModelHyperparameters):
             this_batchsize = x.shape[0]
             t = torch.randint(0,hp.time_steps,(this_batchsize,))
             e = torch.randn_like(x, requires_grad=False)
-            a = scheduler.alpha[t].view(this_batchsize,1,1,1).cuda()
+            a = scheduler.alpha[t].view(this_batchsize,1,1,1).to(hp.device)
             x = (torch.sqrt(a)*x) + (torch.sqrt(1-a)*e)
             output = model(x, t)
             optimizer.zero_grad()
@@ -236,4 +240,97 @@ def train(hp: ModelHyperparameters):
         'ema': ema.state_dict()
     }
 
-    torch.save(checkpoint, f'{hp.model_dir}/{hp.model_name}')
+    path = f'{hp.model_dir}/{hp.model_name}'
+    torch.save(checkpoint, f"{path}_checkpoint")
+    save_hyperparameters(hp)
+
+    ###
+    # SAVE + PLOT LOSS
+    ###
+    np.savez(f"{path}_loss.npz", train=loss["train"], val=loss["val"])
+
+    fname_loss = f"{path}_loss.png"
+    title = f"{hp.model_name} Loss"
+    plot_loss(loss, fname_loss, title, transform="log")
+
+
+
+'''
+Generation plotting 
+'''
+def display_sequence(images: List ):
+    fig, axes = plt.subplots(1, 10, figsize=(10,1))
+    for i, ax in enumerate(axes.flat):
+        x = images[i].squeeze(0)
+        x = rearrange(x, 'c h w -> h w c')
+        x = x.numpy()
+        ax.imshow(x)
+        ax.axis('off')
+    plt.savefig('test.png')
+
+def decode(hp):
+    checkpoint_path = hp.checkpoint_path
+
+    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+    model = UNET(hp).to(hp.device)
+    model.load_state_dict(checkpoint['weights'])
+    ema = ModelEmaV3(model, decay=hp.ema_decay)
+    ema.load_state_dict(checkpoint['ema'])
+    scheduler = DDPM_Scheduler(num_time_steps=hp.time_steps)
+    times = [0,15,50,100,200,300,400,550,700,999]
+
+    with torch.no_grad():
+        model = ema.module.eval()
+        for i in range(3):
+            print(i)
+            images = []
+            z = torch.randn(1, 1, 256, 256)
+            for t in reversed(range(1, hp.time_steps)):
+                t = [t]
+                temp = (scheduler.beta[t]/( (torch.sqrt(1-scheduler.alpha[t]))*(torch.sqrt(1-scheduler.beta[t])) ))
+                z = (1/(torch.sqrt(1-scheduler.beta[t])))*z - (temp*model(z.to(hp.device),t).cpu())
+                if t[0] in times:
+                    images.append(z)
+                e = torch.randn(1, 1, 256, 256)
+                z = z + (e*torch.sqrt(scheduler.beta[t]))
+            temp = scheduler.beta[0]/( (torch.sqrt(1-scheduler.alpha[0]))*(torch.sqrt(1-scheduler.beta[0])) )
+            x = (1/(torch.sqrt(1-scheduler.beta[0])))*z - (temp*model(z.to(hp.device),[0]).cpu())
+
+            images.append(x)
+
+            display_sequence(images)
+
+
+
+
+def encode(hp):
+    checkpoint_path = hp.checkpoint_path
+
+    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+    model = UNET(hp).to(hp.device)
+    model.load_state_dict(checkpoint['weights'])
+    ema = ModelEmaV3(model, decay=hp.ema_decay)
+    ema.load_state_dict(checkpoint['ema'])
+    scheduler = DDPM_Scheduler(num_time_steps=hp.time_steps)
+    times = [0,15,50,100,200,300,400,550,700,999]
+
+    with torch.no_grad():
+        model = ema.module.eval()
+        for i in range(3):
+            print(i)
+            images = []
+            for t in range(1, hp.time_steps):
+                t = [t]
+                temp = (scheduler.beta[t]/( (torch.sqrt(1-scheduler.alpha[t]))*(torch.sqrt(1-scheduler.beta[t])) ))
+                z = (1/(torch.sqrt(1-scheduler.beta[t])))*z - (temp*model(z.to(hp.device),t).cpu())
+                if t[0] in times:
+                    images.append(z)
+                e = torch.randn(1, 1, 256, 256)
+                z = z + (e*torch.sqrt(scheduler.beta[t]))
+            temp = scheduler.beta[0]/( (torch.sqrt(1-scheduler.alpha[0]))*(torch.sqrt(1-scheduler.beta[0])) )
+            x = (1/(torch.sqrt(1-scheduler.beta[0])))*z - (temp*model(z.to(hp.device),[0]).cpu())
+
+            images.append(x)
+
+            display_sequence(images)
+
