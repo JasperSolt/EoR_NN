@@ -7,6 +7,7 @@ models/
 trained_models/
 files/
 
+
 #old files
 archive/
 
@@ -19,6 +20,8 @@ __pycache__/
 FoF-Halo-finder/
 ReionYuga/
 N-Body/
+taming-transformers/
+.vscode/
 
 #bash scripts
 *.sh
@@ -32,9 +35,6 @@ N-Body/
 
 #images
 *.png
-
-#Jupyter notebooks
-*.ipynb
 
 #too big
 wedge_filter.npz

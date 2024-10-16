@@ -2,16 +2,15 @@ import os
 import numpy as np
 import argparse
 import torch
-from diffusion_unet import train, inference
 from hyperparams import DataHyperparameters, ModelHyperparameters
 
 def get_path(model_sim, ws):
     if model_sim == "p21c":
-        dp = f"/users/jsolt/data/jsolt/21cmFAST_sims/p21c14/p21c14_ws{ws}_trnspsd_meanremoved_norm.hdf5"
+        dp = f"/users/jsolt/data/jsolt/21cmFAST_sims/p21c14/p21c14_transposed_ws{ws}.hdf5"
     elif model_sim == "zreion":
         dp = f"/users/jsolt/data/jsolt/zreion_sims/zreion24/zreion24_transposed_ws{ws}.hdf5"
     elif model_sim == "ctrpx":
-        dp = f"/users/jsolt/data/jsolt/21cmFAST_centralpix_v05/21cmFAST_centralpix_v05_transposed_ws{ws}.hdf5"
+        dp = f"/users/jsolt/data/jsolt/centralpix_sims/centralpix05/centralpix05_transposed_ws{ws}.hdf5"
     return dp
 
 # Parse arguments
@@ -35,6 +34,7 @@ hp_train_data = DataHyperparameters(
     ztransform=["zoomin"],
     n_channels=1,
 )
+
 
 if args.debug: hp_train_data.lenlimit=1
 
@@ -71,11 +71,6 @@ hp_model = ModelHyperparameters(
     num_heads = 1,
     debug_mode = args.debug,
 )
-'''
-print("Training Loop")
-if args.debug: torch.autograd.set_detect_anomaly(True)
-train(hp_model)
-'''
-hp_model.checkpoint_path = f'/users/jsolt/FourierNN/trained_models/{model_name}/{model_name}'
-inference(hp_model)
+
+
 

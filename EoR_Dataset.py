@@ -50,12 +50,12 @@ class EORImageDataset(Dataset):
                 
             if verbose: print(f"Sim {i}: {self.dataset_len[i]} samples")
         
-        self.len = sum(self.dataset_len.values())
+        self._len = sum(self.dataset_len.values())
         if verbose: print(f"Total number of samples: {self.len}")
         
-        self.cubes = torch.zeros((self.len, hp.zlength, hp.boxlength, hp.boxlength), dtype=torch.float)
-        self.labels = torch.zeros((self.len, 2), dtype=torch.float)
-        self.classes = torch.zeros((self.len,), dtype=torch.float)
+        self.cubes = torch.zeros((self._len, hp.zlength, hp.boxlength, hp.boxlength), dtype=torch.float)
+        self.labels = torch.zeros((self._len, 2), dtype=torch.float)
+        self.classes = torch.zeros((self._len,), dtype=torch.float)
 
         #####
         #
@@ -99,13 +99,13 @@ class EORImageDataset(Dataset):
             #self.labels = torch.repeat_interleave(self.labels, self.rebatch, dim=0)
             #self.classes = torch.repeat_interleave(self.classes, self.rebatch, dim=0)
             self.cubes = torch.reshape(self.cubes, (self.len*self.rebatch, hp.n_channels, hp.boxlength, hp.boxlength))
-            self.len *= self.rebatch
+            self._len *= self.rebatch
 
             
     
     #Override from Dataset
     def __len__(self):
-        return self.len
+        return self._len
 
     #Override from Dataset
     def __getitem__(self, idx):
@@ -114,9 +114,9 @@ class EORImageDataset(Dataset):
             rpm = torch.randperm(cube.size()[0])
             cube = cube[rpm]
             
-        label, cls = self.labels[idx // self.rebatch], self.classes[idx // self.rebatch]
+        #label, cls = self.labels[idx // self.rebatch], self.classes[idx // self.rebatch]
         
-        return cube, label, cls
+        return cube # label, cls
 
 
     #####
@@ -150,3 +150,10 @@ class EORImageDataset(Dataset):
         x = r % self.subdiv[sim_index]
         y = r // self.subdiv[sim_index]
         return i, x, y
+    
+
+
+
+
+
+
