@@ -3,7 +3,7 @@ torchenv/
 myenv/
 
 #models directory. Consider adding exceptions for recent models
-models/
+trained_models/
 
 #old files
 archive/
@@ -17,6 +17,7 @@ __pycache__/
 FoF-Halo-finder/
 ReionYuga/
 N-Body/
+taming-transformers/
 
 #bash scripts
 *.sh
