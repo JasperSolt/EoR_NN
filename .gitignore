@@ -32,9 +32,6 @@ taming-transformers/
 #images
 *.png
 
-#Jupyter notebooks
-*.ipynb
-
 #too big
 wedge_filter.npz
 *.npz
