@@ -22,6 +22,7 @@ ReionYuga/
 N-Body/
 taming-transformers/
 .vscode/
+hub/
 
 #bash scripts
 *.sh
