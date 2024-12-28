@@ -3,7 +3,10 @@ torchenv/
 myenv/
 
 #models directory. Consider adding exceptions for recent models
+models/
 trained_models/
+files/
+
 
 #old files
 archive/
@@ -18,6 +21,7 @@ FoF-Halo-finder/
 ReionYuga/
 N-Body/
 taming-transformers/
+.vscode/
 hub/
 
 #bash scripts
