@@ -17,7 +17,7 @@ def plot_loss(loss, fname, title="",start=10, steps=[], steplabels=[], transform
     ax.grid(True)
 
     ax.set_ylabel('Loss')
-    train_loss, val_loss = loss['train'][start:], loss['val'][start:]
+    train_loss, val_loss = np.array(loss['train'])[start:], np.array(loss['val'])[start:]
     
     if transform == "log":
         train_loss = np.log10(train_loss)
@@ -49,7 +49,6 @@ def plot_loss(loss, fname, title="",start=10, steps=[], steplabels=[], transform
     ax.set_title(title)
     
     plt.savefig(fname)
-    print("Loss plot saved.")
     plt.close()
 
 
@@ -140,9 +139,8 @@ def plot_loss_comparison(loss, fname, title="", start=10, steps=[], steplabels=[
 
 
 def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
-    dlabels = labels
-    if not dlabels:
-        dlabels = npz_names
+    if not labels:
+        labels = npz_names
     
     n_models = len(npz_names)
     model_colors = ['r','g','b','c','m','y']
@@ -167,7 +165,7 @@ def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
     recs = []
     for i in range(n_models):
         recs.append(mpatches.Rectangle((0,0),0.5,0.5, fc=model_colors[i]))
-    ax1.legend(recs, dlabels, fontsize=10)
+    ax1.legend(recs, labels, fontsize=10)
 
     #ax2 formatting
     ax2.locator_params(nbins=5)

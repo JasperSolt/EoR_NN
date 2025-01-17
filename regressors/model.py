@@ -4,24 +4,23 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 #from accelerate import Accelerator
-from hyperparams import Model_Hyperparameters as hp
 from EoR_Dataset import EORImageDataset
-from plotting import plot_loss
+from util.plotting import plot_loss
 
 #model class
 class Fourier_NN(nn.Module):
-    def __init__(self, hp):
-        self.hp=hp
+    def __init__(self, cfg):
+        self.cfg=cfg
         super(Fourier_NN, self).__init__()
         
-        self.layer_dict = hp.LAYER_DICT
+        self.layer_dict = cfg.LAYER_DICT
         for name, layer in self.layer_dict.items():
             self.add_module(name, layer)
 
     # Forward propagation of some batch x. 
     def forward(self, x):
         layer_output = x
-        for name, layer in self.layer_dict.items():
+        for _, layer in self.layer_dict.items():
             layer_output = layer(layer_output)
         return layer_output
 
@@ -36,7 +35,7 @@ def train(dataloader, model, optimizer):
         pred = model(X)
         y = torch.reshape(y, pred.shape)
         # Compute prediction error
-        loss = model.hp.loss_fn(pred, y)
+        loss = model.cfg.loss_fn(pred, y)
         
         # Backpropagation
         optimizer.zero_grad()
@@ -59,7 +58,7 @@ def test(dataloader, model):
             X, y = X.to("cuda"), y.to("cuda")
             pred = model(X)
             y = torch.reshape(y, pred.shape)
-            tot_loss += model.hp.loss_fn(pred, y).item()
+            tot_loss += model.cfg.loss_fn(pred, y).item()
     avg_loss = tot_loss / len(dataloader)
     print("Average test loss: {}".format(avg_loss))
     return avg_loss

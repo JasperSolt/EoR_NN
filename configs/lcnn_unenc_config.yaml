@@ -1,0 +1,32 @@
+model:
+  base_name: lcnn_unenc_v00
+  batchsize: 32
+  epochs: 1000
+  lr: 0.01
+  lr_gamma: 0.05
+  lr_decay: true
+  conv_channels:
+  - 16
+  - 32
+  - 64
+  downsample:
+  - true
+  - true
+  - true
+  linear_features:
+  - 200
+  - 100
+  - 20
+  device: cuda
+data:
+  data_paths:
+    p21c: /users/jsolt/data/jsolt/21cmFAST_sims/p21c14/p21c14_subdiv_sliced_ws${data.wedgeslope}.hdf5
+    zreion: /users/jsolt/data/jsolt/zreion_sims/zreion24/zreion24_subdiv_sliced_ws${data.wedgeslope}.hdf5
+    ctrpx: /users/jsolt/data/jsolt/centralpix_sims/centralpix05/centralpix05_subdiv_sliced_ws${data.wedgeslope}.hdf5
+  zlength: 30
+  boxlength: 256
+  param_index: 1
+  normalize: false
+  sims:
+  - p21c
+  wedgeslope: 0.0

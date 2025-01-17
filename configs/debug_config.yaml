@@ -1,0 +1,8 @@
+model:
+  name: debug
+  model_dir: trained_models/debug
+  batchsize: 1
+  epochs: 2
+data:
+  lenlimit: 4
+debug: True

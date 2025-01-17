@@ -5,6 +5,7 @@ myenv/
 #models directory. Consider adding exceptions for recent models
 models/
 trained_models/
+trained_models_archive/
 files/
 
 

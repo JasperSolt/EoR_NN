@@ -5,7 +5,7 @@ from torch import optim
 from torch import nn
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader, Dataset
-from hyperparams import save_hyperparameters
+from util.config import save_config
 from EoR_Dataset import EORImageDataset
 from plot_model_results import plot_loss
 
@@ -80,11 +80,7 @@ class conv_var_encoder(nn.Module):
         x = self.pool(self.relu(self.conv1(x)))
         x = self.pool(self.relu(self.conv2(x)))
         x = self.pool(self.relu(self.conv3(x)))
-        '''
-        x = self.pool(self.relu(self.conv1(x)))
-        x = self.pool(self.relu(self.conv2(x)))
-        x = self.pool(self.relu(self.conv3(x)))
-        '''
+
         mean = self.conv_mean(x)
         var = self.conv_var(x)
         return mean, var
@@ -235,7 +231,7 @@ def train_vae(hp):
         os.mkdir(hp.model_dir)
         path = f"{hp.model_dir}/{hp.model_name}"
         torch.save(model.state_dict(), f"{path}.pth")
-        save_hyperparameters(hp)
+        save_config(hp)
 
         ###
         # SAVE + PLOT LOSS

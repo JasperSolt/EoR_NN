@@ -1,0 +1,31 @@
+model:
+  base_name: lcnn_v09
+  batchsize: 32
+  epochs: 1000
+  lr: 0.001
+  lr_gamma: 0.05
+  lr_decay: false
+  conv_channels:
+  - 16
+  - 64
+  downsample:
+  - false
+  - false
+  global_maxpool: false
+  linear_features:
+  - 200
+  - 100
+  - 20
+  device: cuda
+data:
+  data_paths:
+    p21c: /users/jsolt/data/jsolt/21cmFAST_sims/p21c14/p21c14_norm_encoded_ws${data.wedgeslope}.hdf5
+    zreion: /users/jsolt/data/jsolt/zreion_sims/zreion24/zreion24_norm_encoded_ws${data.wedgeslope}.hdf5
+    ctrpx: /users/jsolt/data/jsolt/centralpix_sims/centralpix05/centralpix05_norm_encoded_ws${data.wedgeslope}.hdf5
+  zlength: 120
+  boxlength: 32
+  param_index: 1
+  normalize: false
+  sims:
+  - p21c
+  wedgeslope: 0.0
