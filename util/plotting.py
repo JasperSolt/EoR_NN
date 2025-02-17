@@ -4,9 +4,10 @@ import matplotlib.gridspec as gridspec
 import matplotlib.patches as mpatches
 from matplotlib import colors
 matplotlib.use('AGG')
+
 import numpy as np
-import os
-import h5py
+from numpy.typing import NDArray
+
 import pandas as pd
 
 
@@ -215,22 +216,15 @@ def plot_model_predictions(npz_names, figname, param, labels=None, title=None):
 
 
 
-def plot_image_rows(rowdict, **kwargs):
+def plot_image_rows(rowdict: dict[str, NDArray[np.float32]], 
+                    title: str=None, 
+                    fname: str=None,
+                    collabels: str=None,
+                    **kwargs):
     """Saves a plot of rows of images. 
     This function is for comparing rows of images from different sets of data. Use plot_image_grid if you just want to plot lots of images in a grid.
-    
-    Args:
-       rowdict (dict {rowlabel -> list}): List of numpy arrays of shape (ncols, w, h). len(rows) = nrows
-    
-    Kwargs:
-       title (str): Figure title.
-       fname (str): Name to save image under. If None, runs plt.show() instead of saving.
-       collabels (list of str): list of column labels. Must be length ncols.
-       vmin (float): minimum colorbar value
-       vmax (float): maximum colorbar value
-        
     """
-    rowlabels = kwargs.get("rowlabels", list(rowdict.keys()))
+    rowlabels = list(rowdict.keys())
     rows = [rowdict[k] for k in rowlabels]
     
     nrows = len(rows)
@@ -246,7 +240,7 @@ def plot_image_rows(rowdict, **kwargs):
                             figsize = (w,h),
                             layout='constrained'
                            )
-    if 'title' in kwargs: fig.suptitle(kwargs['title'])
+    if title: fig.suptitle(title)
     
     axs = axs.reshape((nrows,ncols))
     images = [axs[r,c].imshow(rows[r][c]) for r in range(nrows) for c in range(ncols)]
@@ -256,15 +250,14 @@ def plot_image_rows(rowdict, **kwargs):
         ax.set_xticks([])
 
 
-    if 'collabels' in kwargs: 
+    if collabels is not None: 
         for c in range(ncols):
-            axs[0,c].set_title(kwargs['collabels'][c], fontsize=10)
+            axs[0,c].set_title(collabels[c], fontsize=10)
 
     for r in range(nrows):
         axs[r,0].set_ylabel(rowlabels[r], fontsize=10)
 
     
-
     vmin = kwargs.get('vmin', min(image.get_array().min() for image in images))
     vmax = kwargs.get('vmax', max(image.get_array().max() for image in images))
         
@@ -272,14 +265,11 @@ def plot_image_rows(rowdict, **kwargs):
     for im in images: im.set_norm(norm)
     fig.colorbar(images[0], ax=axs, orientation='horizontal', fraction=0.05, aspect=60)
     
-    if 'fname' in kwargs:
-        plt.savefig(kwargs['fname'])
+    if fname:
+        plt.savefig(fname)
     else:
         plt.show()
     plt.close()
-
-
-
 
 
 def calc_aspect_ratio(n, y, x):
@@ -294,8 +284,7 @@ def calc_aspect_ratio(n, y, x):
     return cols, rows
 
 
-
-def plot_image_grid(imgrid, title=None, fname=None, colorbar=True):
+def plot_image_grid(imgrid:NDArray, title:str=None, fname:str=None, fnames:list[str]=None, colorbar:bool=True, ylbl:bool=True):
     cols, rows = calc_aspect_ratio(*imgrid.shape)
 
     fig, axs = plt.subplots(rows, cols, layout='constrained')
@@ -312,7 +301,8 @@ def plot_image_grid(imgrid, title=None, fname=None, colorbar=True):
             ax.set_xticks([])
             ax.set_yticks([])
         
-        ylbl = axs[r,0].set_ylabel(f"{r*cols}-{(r+1)*cols-1}", x=0, y=0.5, 
+        if ylbl:
+            axs[r,0].set_ylabel(f"{r*cols}-{(r+1)*cols-1}", x=0, y=0.5, 
                              horizontalalignment='right', 
                              verticalalignment='center',
                              rotation=0)
@@ -329,7 +319,120 @@ def plot_image_grid(imgrid, title=None, fname=None, colorbar=True):
         plt.colorbar(images[0], ax=axs)
 
     if fname:
+        plt.savefig(fname, dpi=300)
+    else:
+        if fnames:
+            for f in fnames: plt.savefig(f, dpi=300)
+        else:
+            plt.show()
+    plt.close()
+
+
+
+
+
+
+def plot_cf_loss(loss_dict, fname:str=None, fnames:list[str]=None, title="", start=0, steps=[], steplabels=[]):    
+    ax = plt.subplot()
+    ax.grid(True)
+    ax.set_ylabel('Loss')
+
+
+    for k in loss_dict.keys():
+        loss = np.array(loss_dict[k])[start:]
+        loss = pd.DataFrame(loss).ewm(com=5.0).mean()
+        
+        epochs = np.arange(start+1, len(loss)+start+1)
+
+        ax.plot(epochs, loss, label=k, linewidth=1.0)
+    
+    for i in range(len(steps)):
+        ax.axvline(steps[i], color='red', ls=":", alpha=0.5)
+        ax.text(
+            steps[i]-0.02*(ax.get_xlim()[1]), 
+            ax.get_ylim()[1] - 0.03*(ax.get_ylim()[1]-ax.get_ylim()[0]), 
+            steplabels[i],
+            horizontalalignment='right',
+            verticalalignment='top',
+            color='#000000',
+            backgroundcolor='#eeeeeec0',)
+    
+    ax.set_xlabel('Epochs')
+    ax.set_title(title)
+    ax.legend()
+    if fname:
         plt.savefig(fname)
+    else:
+        if fnames:
+            for f in fnames: plt.savefig(f)
+        else:
+            plt.show()
+    plt.close()
+
+def plot_counterfactuals(input_row: NDArray[np.float32], 
+                         cf_row: NDArray[np.float32], 
+                         diff_row: NDArray[np.float32], 
+                         title: str=None, 
+                         fname: str=None,
+                         rowlabels: str=None,
+                         collabels: str=None,
+                         **kwargs):
+
+    nrows = 3
+    ncols, _, _ = input_row.shape
+
+    
+    imsize = 1.3
+    w = ncols*imsize + 0.2
+    h = nrows*imsize + 1.4
+    
+    
+    fig, axs = plt.subplots(nrows, ncols, 
+                            figsize = (w,h),
+                            layout='constrained'
+                           )
+    if title: fig.suptitle(title)
+    
+    axs = axs.reshape((nrows,ncols))
+    
+    colorbar_group_1 = []
+    colorbar_group_1.extend([axs[0,c].imshow(input_row[c]) for c in range(ncols)])
+    colorbar_group_1.extend([axs[1,c].imshow(cf_row[c]) for c in range(ncols)])
+
+    colorbar_group_2 = []
+    colorbar_group_2.extend([axs[2,c].imshow(diff_row[c]) for c in range(ncols)])
+
+    for ax in axs.flatten():
+        ax.set_yticks([])
+        ax.set_xticks([])
+
+    if collabels is not None: 
+        for c in range(ncols):
+            axs[0,c].set_title(collabels[c], fontsize=10)
+
+    for r in range(nrows):
+        axs[r,0].set_ylabel(rowlabels[r], fontsize=10)
+
+    
+    # colorbar 1
+    vmin = min(image.get_array().min() for image in colorbar_group_1)
+    vmax = max(image.get_array().max() for image in colorbar_group_1)
+        
+    norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    for im in colorbar_group_1: im.set_norm(norm)
+    fig.colorbar(colorbar_group_1[0], ax=axs[1], orientation='horizontal', fraction=0.1, aspect=60)
+    
+    # colorbar 2
+    vmin = min(image.get_array().min() for image in colorbar_group_2)
+    vmax = max(image.get_array().max() for image in colorbar_group_2)
+        
+    norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    for im in colorbar_group_2: im.set_norm(norm)
+    fig.colorbar(colorbar_group_2[0], ax=axs[2], orientation='horizontal', fraction=0.1, aspect=60)
+    
+
+    if fname:
+        plt.savefig(fname, dpi=300)
     else:
         plt.show()
     plt.close()

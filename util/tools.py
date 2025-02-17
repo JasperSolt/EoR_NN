@@ -135,4 +135,3 @@ def find_filter(shape, slp):
                     filtr[i,j,k] = 0.0
     return filtr
 
-    

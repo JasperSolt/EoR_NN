@@ -11,10 +11,10 @@ from EoR_Dataset import SimpleEORImageDataset
 from util.plotting import plot_loss
 
 #model class
-class lcnn(nn.Module):
+class cnn(nn.Module):
     def __init__(self, cfg):
         self.cfg=cfg
-        super(lcnn, self).__init__()
+        super(cnn, self).__init__()
         
         # Attributes
         self.n_conv_layers = len(cfg.model.conv_channels)
@@ -72,7 +72,7 @@ class lcnn(nn.Module):
 
 
 
-def train_lcnn(cfg):
+def train_cnn(cfg):
     # training & testing datasets
     print("Loading training data...")
     train_data = SimpleEORImageDataset("train", cfg)
@@ -85,7 +85,7 @@ def train_lcnn(cfg):
     device = cfg.model.device
     assert device=="cuda"
 
-    model = lcnn(cfg)
+    model = cnn(cfg)
     model.to(device)
 
     print(model)
@@ -173,11 +173,11 @@ def train_lcnn(cfg):
 
 
 
-def predict_lcnn(cfg, mode="test"):
+def predict_cnn(cfg, mode="test"):
     print("Loading test data...")
     test_data = SimpleEORImageDataset(mode, cfg) 
     test_dataloader = DataLoader(test_data, batch_size=cfg.model.batchsize, shuffle=True)
-    model = lcnn(cfg)
+    model = cnn(cfg)
     model.to(cfg.model.device)
     path = f"{cfg.model.model_dir}/{cfg.model.name}"
 

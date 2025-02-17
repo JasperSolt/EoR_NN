@@ -147,15 +147,6 @@ class EORImageDataset(Dataset):
 
 
 
-
-
-
-
-
-
-
-
-
 class EOREncodedImageDataset(Dataset):
     #Load data at initialization. Override from Dataset superclass
     def __init__(self, mode, cfg):
@@ -207,3 +198,39 @@ class EOREncodedImageDataset(Dataset):
     # Helper functions
     def norm_to_unit_interval(self, x):
         return (x - x.min()) / (x.max()-x.min())
+
+
+
+class SimpleEORImageDataset(Dataset):
+    #Load data at initialization. Override from Dataset superclass
+    def __init__(self, mode, cfg):
+        
+        self.mode = mode
+        data_cfg = cfg.data
+
+        cube_key = 'lightcones/brightness_temp'
+        label_key = 'lightcone_params/physparams'
+        
+        dataset_lenlimit = data_cfg.get('lenlimit', -1)
+        
+        sim = data_cfg.sims[0]
+
+        with h5py.File(data_cfg.data_paths[sim], "r") as f: 
+            n_lightcones, *_ = f[cube_key].shape #(n, 30, 4, 32, 32)
+            
+            begin, end = get_dataset_range(mode, n_lightcones)
+            if dataset_lenlimit > 0 and (end - begin) > dataset_lenlimit:
+                end = begin + dataset_lenlimit
+            self._len = end - begin
+
+            self.cubes = torch.tensor(f[cube_key][begin:end], dtype=torch.float)
+            self.labels = torch.tensor(f[label_key][begin:end, data_cfg.param_index], dtype=torch.float)[:,None]
+    
+    #Override from Dataset
+    def __len__(self):
+        return self._len
+
+    #Override from Dataset
+    def __getitem__(self, idx):
+        return self.cubes[idx], self.labels[idx]
+    

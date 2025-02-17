@@ -2,8 +2,7 @@ import datetime
 import numpy as np
 import argparse
 from omegaconf import OmegaConf
-import torch
-from regressors.latent_cnn import train_lcnn, predict_lcnn
+from regressors.cnn import train_cnn, predict_cnn
 from util.plotting import plot_model_predictions
 
 
@@ -37,7 +36,6 @@ SET UP CONFIG
 '''
 # Load
 base_cfg = OmegaConf.load(args.config)
-#cli_cfg = OmegaConf.from_cli()
 cli_cfg = OmegaConf.from_dotlist(unknown)
 
 cfg = OmegaConf.merge(base_cfg, cli_cfg)
