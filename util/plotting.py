@@ -9,31 +9,55 @@ import numpy as np
 from numpy.typing import NDArray
 
 import pandas as pd
+from scipy import ndimage
+
+
+####
+#
+# Plots a distribution given a dictionary of {parameter : {label: list of values}}
+#
+#####
+def plot_histogram(paramdict:dict[str:list], title=None, fname=None, nbins=10):
+    fig, ax = plt.subplots()
+    if title: ax.set_title(title)
+    ax.grid(True)
+
+    minval = np.array([v for v in paramdict.values()]).min()
+    maxval = np.array([v for v in paramdict.values()]).max()
+    bins = np.linspace(minval, maxval, nbins+1)
+
+    for sim, data in paramdict.items():
+        ax.hist(data, bins, alpha=0.5, label=sim)
+    
+    ax.legend()
+
+    if fname:
+        plt.savefig(fname)
+    else:
+        plt.show()
+    plt.close()
 
 
 
-
-def plot_loss(loss, fname, title="",start=10, steps=[], steplabels=[], transform=""):    
+def plot_loss(loss_dict, fname, title="",start=0, steps=[], steplabels=[], transform=""):    
     ax = plt.subplot()
     ax.grid(True)
 
     ax.set_ylabel('Loss')
-    train_loss, val_loss = np.array(loss['train'])[start:], np.array(loss['val'])[start:]
-    
-    if transform == "log":
-        train_loss = np.log10(train_loss)
-        val_loss = np.log10(val_loss)
-        ax.set_ylabel('Loss (log)')
+    if transform == "log": ax.set_ylabel('Loss (log)')
 
-    train_loss = pd.DataFrame(train_loss).ewm(com=5.0).mean()
-    val_loss = pd.DataFrame(val_loss).ewm(com=5.0).mean()
-        
-        
-    epochs = np.arange(start+1, len(train_loss)+start+1)
 
-    ax.plot(epochs, val_loss, label='Validation', linewidth=0.7)
-    ax.plot(epochs, train_loss, label='Training', linewidth=1.0)
-    
+    for k in loss_dict.keys():
+        loss = np.array(loss_dict[k])[start:]
+        loss = pd.DataFrame(loss).ewm(com=5.0).mean()
+        if transform == "log":
+            loss = np.log10(loss)
+
+        epochs = np.arange(start+1, len(loss)+start+1)
+
+        ax.plot(epochs, loss, label=k, linewidth=1.0)
+        
+
     for i in range(len(steps)):
         ax.axvline(steps[i], color='red', ls=":", alpha=0.5)
         ax.text(
@@ -296,7 +320,7 @@ def plot_image_grid(imgrid:NDArray, title:str=None, fname:str=None, fnames:list[
             i = r*cols + c
             ax = axs[r,c]
             
-            images.append(ax.imshow(imgrid[i]))
+            images.append(ax.imshow(imgrid[i], interpolation='none'))
             
             ax.set_xticks([])
             ax.set_yticks([])
@@ -314,6 +338,120 @@ def plot_image_grid(imgrid:NDArray, title:str=None, fname:str=None, fnames:list[
         vmin = min(image.get_array().min() for image in images)
         vmax = max(image.get_array().max() for image in images)
         norm = colors.Normalize(vmin=vmin, vmax=vmax)
+        for im in images:
+            im.set_norm(norm)
+        plt.colorbar(images[0], ax=axs)
+
+    if fname:
+        plt.savefig(fname, dpi=300)
+    else:
+        if fnames:
+            for f in fnames: plt.savefig(f, dpi=300)
+        else:
+            plt.show()
+    plt.close()
+
+
+
+
+
+
+
+
+def rgb_white2alpha(rgb):
+    """
+    Convert a set of RGB colors to RGBA with maximum transparency.
+    
+    The transparency is maximised for each color individually, assuming
+    that the background is white.
+    
+    Parameters
+    ----------
+    rgb : array_like shaped (N, 3)
+        Original colors.
+    ensure_increasing : bool, default=False
+        Ensure that alpha values are strictly increasing.
+    
+    Returns
+    -------
+    rgba : numpy.ndarray shaped (N, 4)
+        Colors with maximum possible transparency, assuming a white
+        background.
+    """
+    # The most transparent alpha we can use is given by the min of RGB
+    # Convert it from saturation to opacity
+    alpha = 1. - np.min(rgb, axis=1)
+
+    alpha = np.expand_dims(alpha, -1)
+    # Rescale colors to discount the white that will show through from transparency
+    rgb = (rgb + alpha - 1) / alpha
+    # Concatenate our alpha channel
+    return np.clip(np.concatenate((rgb, alpha), axis=1), 0.0, 1.0)
+    
+
+def cmap_white2alpha(name):
+    # Fetch the cmap callable
+    cmap = plt.get_cmap(name)
+    # Get the colors out from the colormap LUT
+    rgb = cmap(np.arange(cmap.N))[:, :3]  # N-by-3
+    # Convert white to alpha
+    rgba = rgb_white2alpha(rgb)
+    # Create a new Colormap object
+    cmap_alpha = matplotlib.colors.ListedColormap(rgba, name=name + "_alpha")
+    return cmap_alpha
+
+
+
+
+
+def plot_imgrid_with_overlay(imgrid:NDArray, 
+                             overlaygrid:NDArray, 
+                             title:str=None, 
+                             fname:str=None, 
+                             fnames:list[str]=None, 
+                             colorbar:bool=True, 
+                             ylbl:bool=True,
+                             overlay_smoothing=0.0,
+                             ):
+    cols, rows = calc_aspect_ratio(*imgrid.shape)
+    sigma = [overlay_smoothing, overlay_smoothing]
+
+    fig, axs = plt.subplots(rows, cols, layout='constrained')
+    if title: fig.suptitle(title)
+    images = []
+
+    gray_big = matplotlib.colormaps['gray']
+    gray_clipped = colors.ListedColormap(gray_big(np.linspace(0.5, 1.0, 128)))
+    
+    cmap_overlay = cmap_white2alpha("seismic")
+
+    for r in range(rows):
+        for c in range(cols):
+            i = r*cols + c
+            ax = axs[r,c]
+
+            ax.imshow(imgrid[i], cmap=gray_clipped, interpolation='none')
+            overlay = ndimage.gaussian_filter(overlaygrid[i], sigma, mode='constant')
+            #overlay = overlaygrid[i]
+            images.append(ax.imshow(overlay, cmap=cmap_overlay, interpolation='none'))
+            
+            ax.set_xticks([])
+            ax.set_yticks([])
+        
+        if ylbl:
+            axs[r,0].set_ylabel(f"{r*cols}-{(r+1)*cols-1}", x=0, y=0.5, 
+                             horizontalalignment='right', 
+                             verticalalignment='center',
+                             rotation=0)
+
+    ###
+    # Colorbar
+    ###
+    if colorbar:
+        vmin = min(image.get_array().min() for image in images)
+        vmax = max(image.get_array().max() for image in images)
+        vrange = max(vmax, -vmin)
+        norm = colors.Normalize(vmin=-vrange, vmax=vrange)
         for im in images:
             im.set_norm(norm)
         plt.colorbar(images[0], ax=axs)
@@ -369,6 +507,8 @@ def plot_cf_loss(loss_dict, fname:str=None, fnames:list[str]=None, title="", sta
             plt.show()
     plt.close()
 
+
+'''
 def plot_counterfactuals(input_row: NDArray[np.float32], 
                          cf_row: NDArray[np.float32], 
                          diff_row: NDArray[np.float32], 
@@ -436,3 +576,4 @@ def plot_counterfactuals(input_row: NDArray[np.float32],
     else:
         plt.show()
     plt.close()
+'''

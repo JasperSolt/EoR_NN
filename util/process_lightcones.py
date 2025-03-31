@@ -41,12 +41,10 @@ def save_good_lightcones_list(lc_path):
 
 
 def process_all(fname, ws, new_z, new_xy, lightcones, norm=False, debug=False):
-    
     n = len(lightcones) if not debug else 3
     
     with h5py.File(lightcones[0]) as lc_file:
         oldshape = lc_file['lightcones/brightness_temp'].shape
-        node_redshifts = np.flip(lc_file['node_redshifts'][:])
 
     old_xy, _, old_z = oldshape
     old_z = 512
@@ -78,6 +76,8 @@ def process_all(fname, ws, new_z, new_xy, lightcones, norm=False, debug=False):
             with h5py.File(lightcones[ni], 'r') as lc_file:
                 bT_cube = lc_file['lightcones/brightness_temp'][:,:,:old_z]
                 global_xH = np.flip(lc_file['global_quantities/xH_box'][:])
+                node_redshifts = np.flip(lc_file['node_redshifts'][:])
+
             
             # Find params for later
             z25, z50, z75 = np.interp([0.25, 0.5, 0.75], global_xH, node_redshifts)
@@ -304,43 +304,47 @@ if __name__ == "__main__":
     get_name = {
         "zreion" : "zreion24",
         "ctrpx" : "centralpix05",
+        "ctrpxbig" : "centralpixbig01",
         "fllsphr" : "fullsphere02"
         }
 
     get_src_dir = {
         "zreion": f"/users/jsolt/data/jsolt/zreion_sims/{get_name['zreion']}",
         "ctrpx" : "/users/jsolt/data/jsolt/lightcones/21cmFAST_lightcones_centralpix_v05",
-        "fllsphr" : "/users/jsolt/data/jsolt/lightcones/21cmFAST_lightcones_fullsphere_v02",        
+        "ctrpxbig" : "/users/jsolt/data/jsolt/lightcones/21cmFAST_lightcones_centralpix_big_v01",
+        "fllsphr" : "/users/jsolt/data/jsolt/lightcones/21cmFAST_lightcones_fullsphere_v04",        
         }
 
     get_dir = {
         "zreion" : "/users/jsolt/data/jsolt/zreion_sims",
         "ctrpx" : "/users/jsolt/data/jsolt/centralpix_sims",
+        "ctrpxbig" : "/users/jsolt/data/jsolt/centralpix_sims",
         "fllsphr" : "/users/jsolt/data/jsolt/fullsphere_sims"
         }
 
     sim, ws = args.sim, args.wedgeslope
+    norm = False
 
     sim_name = get_name[sim]
     save_dir = f"{get_dir[sim]}/{sim_name}"
     src_dir = get_src_dir[sim]
 
-    fname1 = f"{save_dir}/{sim_name}_norm_subdiv_sliced_ws{ws}.hdf5"
-    fname2 = f"{save_dir}/{sim_name}_norm_encoded_ws{ws}.hdf5"
-    fname3 = f"{save_dir}/{sim_name}_norm_decoded_ws{ws}.hdf5"
+    if norm: sim_name += '_norm'
+    fname1 = f"{save_dir}/{sim_name}_subdiv_sliced_ws{ws}.hdf5"
+    fname2 = f"{save_dir}/{sim_name}_encoded_ws{ws}.hdf5"
+    fname3 = f"{save_dir}/{sim_name}_decoded_ws{ws}.hdf5"
 
     if not os.path.isdir(save_dir): os.mkdir(save_dir)
     
-    if sim in ["fllsphr", "ctrpx"]:
-        # Find good lc files (ctrpx and p21c only)
-        good_lc = save_good_lightcones_list(src_dir)
-        process_all(fname1, ws, new_z=30, new_xy=256, norm=True, lightcones=good_lc)
-
-    elif sim == "zreion":
+    if sim == "zreion":
         src_fname = f"{src_dir}/{sim_name}.hdf5"
         process_all_from_hdf5(fname1, ws, new_z=30, new_xy=256, norm=True, src_fname=src_fname)
-    
+    else:
+        good_lc = save_good_lightcones_list(src_dir)
+        process_all(fname1, ws, new_z=30, new_xy=256, norm=norm, lightcones=good_lc)
+
+
     # Encode and save lightcones
-    encode_lightcones(fname1, fname2, prenorm=True)
+    encode_lightcones(fname1, fname2, prenorm=False)
     
     decode_lightcones(fname2, fname3)

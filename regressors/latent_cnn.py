@@ -7,7 +7,7 @@ from torch import nn
 from torch import optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
-from EoR_Dataset import SimpleEORImageDataset
+from EoR_Dataset import EORImageDataset
 from util.plotting import plot_loss
 
 #model class
@@ -75,9 +75,9 @@ class lcnn(nn.Module):
 def train_lcnn(cfg):
     # training & testing datasets
     print("Loading training data...")
-    train_data = SimpleEORImageDataset("train", cfg)
+    train_data = EORImageDataset("train", cfg.data)
     print("Loading validation data...")
-    val_data = SimpleEORImageDataset("val", cfg) 
+    val_data = EORImageDataset("val", cfg.data) 
     
     # training & testing dataloaders
     train_dataloader = DataLoader(train_data, batch_size=cfg.model.batchsize, shuffle=True)
@@ -175,7 +175,7 @@ def train_lcnn(cfg):
 
 def predict_lcnn(cfg, mode="test"):
     print("Loading test data...")
-    test_data = SimpleEORImageDataset(mode, cfg) 
+    test_data = EORImageDataset(mode, cfg.data) 
     test_dataloader = DataLoader(test_data, batch_size=cfg.model.batchsize, shuffle=True)
     model = lcnn(cfg)
     model.to(cfg.model.device)

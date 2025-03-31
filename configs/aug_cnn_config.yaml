@@ -1,0 +1,16 @@
+model:
+  base_name: aug_cnn_v0X
+  epochs: 2000
+  lr: 0.001
+  lr_decay: false
+aug_data:
+  cf_version: "XX"
+  data_path: /users/jsolt/data/jsolt/counterfactuals/${model.parent_model}_counterfactuals_${aug_data.cf_version}.hdf5
+  cube_key: 'lightcones/x_prime'
+  label_key: 'lightcone_params/y_true'
+  zlength: 30
+  boxlength: 256
+  param_index: 1
+  wedgeslope: 0.0
+
+

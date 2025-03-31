@@ -1,10 +1,12 @@
 model:
-  base_name: cnn_unenc_v02
-  batchsize: 32
+  base_name: cnn_v04
+  batchsize: 64
   epochs: 3000
   lr: 0.005
-  lr_gamma: 0.05
-  lr_decay: false
+  lr_decay: true
+  lr_gamma: 0.2
+  lr_milestones: 
+  - 1000
   conv_channels:
   - 16
   - 32
@@ -20,14 +22,9 @@ model:
   - 20
   device: cuda
 data:
-  data_paths:
-    p21c: /users/jsolt/data/jsolt/21cmFAST_sims/p21c14/p21c14_subdiv_sliced_ws${data.wedgeslope}.hdf5
-    zreion: /users/jsolt/data/jsolt/zreion_sims/zreion24/zreion24_subdiv_sliced_ws${data.wedgeslope}.hdf5
-    ctrpx: /users/jsolt/data/jsolt/centralpix_sims/centralpix05/centralpix05_subdiv_sliced_ws${data.wedgeslope}.hdf5
+  cube_key: 'lightcones/brightness_temp'
+  label_key: 'lightcone_params/physparams'
   zlength: 30
   boxlength: 256
   param_index: 1
-  normalize: false
-  sims:
-  - p21c
   wedgeslope: 0.0

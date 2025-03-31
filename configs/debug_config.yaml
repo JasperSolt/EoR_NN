@@ -5,4 +5,6 @@ model:
   epochs: 2
 data:
   lenlimit: 4
+aug_data:
+  lenlimit: 4
 debug: True

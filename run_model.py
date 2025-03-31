@@ -14,7 +14,7 @@ def get_parser():
         "--config",
         type=str,
         const=True,
-        default="configs/lcnn_config.yaml",
+        default="configs/cnn_config.yaml",
         nargs="?",
         help="desc",
     )
@@ -58,18 +58,23 @@ print(cfg.pretty())
 '''
 TRAIN
 '''
-train_lcnn(cfg)
+#train_cnn(cfg)
 
 
 '''
 PREDICT
 '''
-prediction_npzs = []
-prediction_npzs.append(predict_lcnn(cfg, mode="train"))
-prediction_npzs.append(predict_lcnn(cfg, mode="val"))
-prediction_npzs.append(predict_lcnn(cfg))
+all_prediction_npzs = []
+all_prediction_npzs.append(predict_cnn(cfg, cfg.data, mode="train"))
+all_prediction_npzs.append(predict_cnn(cfg, cfg.data, mode="val"))
+test_predictions = predict_cnn(cfg, cfg.data)
+all_prediction_npzs.append(test_predictions)
 
 
 # Plot predictions
-figname = f"{cfg.model.model_dir}/{cfg.model.name}_{cfg.data.param_name}_predictions"
-plot_model_predictions(prediction_npzs, figname, param=cfg.data.param_name, labels=["train","val","test"], title=None)
+figname = f"{cfg.model.model_dir}/{cfg.model.name}_{cfg.data.param_name}_predictions_all"
+plot_model_predictions(all_prediction_npzs, figname, param=cfg.data.param_name, labels=["train", "val", "test"], title=None)
+
+figname = f"{cfg.model.model_dir}/{cfg.model.name}_{cfg.data.param_name}_predictions_test"
+plot_model_predictions([test_predictions], figname, param=cfg.data.param_name, labels=["test"], title=None)
+
